@@ -449,49 +449,60 @@ app.registerExtension({
 
       document.body.appendChild(modal);
 
-      // Load PAL viewport from bundled Three.js (standalone, no server needed)
-      const _initViewport = () => {
-        if (window.PALViewport && window.PALViewport.init) {
-          window.PALViewport.init(container, {
-            state: this._palState || {},
-            onStateChange: (state) => { this._palState = state; },
-          });
-        } else {
-          container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:monospace;font-size:12px;color:#555">
-            PAL viewport failed to initialise.
-          </div>`;
+      // Load full PAL via iframe — complete UI with all panels
+      const apiKeyWidget = this.widgets?.find(w => w.name === "lc_api_key");
+      const projectWidget = this.widgets?.find(w => w.name === "lc_project_id");
+      const palToken = apiKeyWidget?.value || "";
+      const palProject = projectWidget?.value || "";
+      let palUrl = `${LC_API_BASE}/pal?comfy=1`;
+      if (palToken) palUrl += `&token=${encodeURIComponent(palToken)}`;
+      if (palProject) palUrl += `&project=${encodeURIComponent(palProject)}`;
+      if (this._lcSession) {
+        const proj = this._lcSession.project_list?.find(p => p.id === palProject);
+        if (proj) {
+          palUrl += `&project_name=${encodeURIComponent(proj.name || palProject)}`;
+          if (proj.client_id) palUrl += `&client_id=${encodeURIComponent(proj.client_id)}`;
+        }
+      }
+
+      const iframe = document.createElement("iframe");
+      iframe.src = palUrl;
+      iframe.style.cssText = "width:100%;height:100%;border:none;";
+      container.appendChild(iframe);
+
+      // Listen for postMessage from PAL iframe
+      const _iframeHandler = (e) => {
+        if (e.source !== iframe.contentWindow) return;
+        const msg = e.data;
+        if (!msg || !msg.type) return;
+        if (msg.type === "pal:state") this._palState = msg.state || {};
+        if (msg.type === "pal:render") {
+          this._palState.beauty_b64 = msg.beauty;
+          this._palState.depth_b64 = msg.depth;
+          this._palState.normal_b64 = msg.normals;
+          this._palRendered = true;
+          this._updateSummary();
         }
       };
+      window.addEventListener("message", _iframeHandler);
+      this._iframeCleanup = () => window.removeEventListener("message", _iframeHandler);
 
-      if (window.PALViewport) {
-        _initViewport();
-      } else {
-        const bundleSrc = "/extensions/comfyui-lenscowboy-pal/pal_three_bundle.js";
-        console.log("[PAL] Loading viewport bundle from:", bundleSrc);
-        const script = document.createElement("script");
-        script.src = bundleSrc;
-        script.onload = () => { console.log("[PAL] Bundle loaded"); _initViewport(); };
-        script.onerror = () => {
-          container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:monospace;font-size:12px;color:#f87171">
-            Failed to load PAL viewport bundle.
-          </div>`;
+      // Fallback: if no token and iframe shows landing, show message
+      if (!palToken) {
+        setTimeout(() => {
+          container.insertAdjacentHTML("beforeend",
+            `<div style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.8);border:1px solid #2a2a26;border-radius:6px;padding:8px 16px;font-family:monospace;font-size:10px;color:#f5c400;pointer-events:none;z-index:1">
+              Paste your LensCowboy token into lc_api_key to unlock the full viewport
+            </div>`);
+        }, 2000);
         };
         document.head.appendChild(script);
       }
 
-      // Render All — capture passes from standalone viewport
+      // Render All — request passes from PAL iframe
       document.getElementById("pal-comfy-render").onclick = () => {
-        if (window.PALViewport && window.PALViewport.renderPasses) {
-          const passes = window.PALViewport.renderPasses();
-          const plan = this._lcSession?.plan || "free";
-          if (!PAID_PLANS.has(plan) && passes.beauty) {
-            passes.beauty = this._lcApplyWatermark(passes.beauty);
-          }
-          this._palState.beauty_b64 = passes.beauty;
-          this._palState.depth_b64 = passes.depth;
-          this._palState.normal_b64 = passes.normals;
-          this._palRendered = true;
-          this._updateSummary();
+        if (iframe?.contentWindow) {
+          iframe.contentWindow.postMessage({ type: "pal:render-request" }, "*");
         }
       };
 
@@ -623,10 +634,10 @@ app.registerExtension({
     };
 
     nodeType.prototype._saveAndClose = function (modal) {
-      // Capture final state from viewport
-      if (window.PALViewport && window.PALViewport.getState) {
-        const state = window.PALViewport.getState();
-        Object.assign(this._palState, state);
+      // Request state from iframe before closing
+      const iframe = modal.querySelector("iframe");
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.postMessage({ type: "pal:get-state" }, "*");
       }
 
       // Serialise scene state to hidden widget
@@ -636,9 +647,7 @@ app.registerExtension({
       this._updateSummary();
 
       // Cleanup
-      if (window.PALViewport && window.PALViewport.destroy) {
-        window.PALViewport.destroy();
-      }
+      if (this._iframeCleanup) { this._iframeCleanup(); this._iframeCleanup = null; }
       modal.remove();
     };
 
