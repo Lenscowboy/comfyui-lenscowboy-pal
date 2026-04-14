@@ -90,6 +90,32 @@ def save_scene(api_key: str, project_id: str, shot_id: str, scene_json: str) -> 
     return resp is not None
 
 
+def fetch_breakdown_data(api_key: str, project_id: str, shot_id: str) -> dict:
+    """
+    GET /pal/comfy/project/{project_id} — fetch a specific shot's breakdown fields.
+    Returns dict with description, camera_notes, lighting_notes, vfx_type.
+    Returns empty dict on any failure.
+    """
+    if not api_key or not project_id or not shot_id:
+        return {}
+
+    project = _request("GET", f"/pal/comfy/project/{project_id}", api_key)
+    if not project:
+        return {}
+
+    shots = project.get("shots", [])
+    shot = next((s for s in shots if s.get("id") == shot_id), None)
+    if not shot:
+        return {}
+
+    return {
+        "description": shot.get("description", ""),
+        "camera_notes": shot.get("camera_notes", ""),
+        "lighting_notes": shot.get("lighting_notes", ""),
+        "vfx_type": shot.get("vfx_type", ""),
+    }
+
+
 def pipeline_writeback(api_key: str, project_id: str, shot_id: str,
                        camera_json: str, frame_start: int, frame_end: int) -> bool:
     """POST /pal/project/{id}/pipeline-writeback — write camera/frames to Pipeline sheet."""

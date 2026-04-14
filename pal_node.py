@@ -23,11 +23,12 @@ MAX_BASE64_BYTES = 15_000_000
 
 class PALNode:
     CATEGORY = "LensCowboy/Layout"
-    RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", "STRING", "STRING", "INT", "INT")
+    RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", "STRING", "STRING", "INT", "INT", "STRING")
     RETURN_NAMES = (
         "beauty_pass", "depth_pass", "normal_pass",
         "scene_json", "camera_json",
         "frame_start", "frame_end",
+        "sequence_json",
     )
     FUNCTION = "execute"
 
@@ -94,9 +95,15 @@ class PALNode:
         scene_json = json.dumps(state.get("scene", resolved.get("scene_state", {})))
         camera_json = json.dumps(state.get("camera", {}))
 
+        # Phase 3 — sequence export output
+        sequence_json = ""
+        if state.get("sequence"):
+            sequence_json = json.dumps(state["sequence"])
+
         return (beauty, depth, normals, scene_json, camera_json,
                 resolved.get("frame_start", frame_start),
-                resolved.get("frame_end", frame_end))
+                resolved.get("frame_end", frame_end),
+                sequence_json)
 
     def _decode_pass(self, b64_str, width, height, channels=3):
         if not b64_str or len(b64_str) > MAX_BASE64_BYTES:

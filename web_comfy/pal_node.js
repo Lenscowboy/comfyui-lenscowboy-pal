@@ -8,6 +8,7 @@
  * - Bridge viewport scene state ↔ node hidden widget (_pal_scene_state)
  * - Block Queue Prompt via beforeQueuePrompt if passes not yet rendered
  * - Phase 2: connection badge, project/shot selector, watermark, enriched summary
+ * - Phase 3: breakdown sidebar, pipeline write-back, sequence export, shot switcher
  */
 
 import { app } from "../../scripts/app.js";
@@ -42,6 +43,10 @@ app.registerExtension({
       this._lcBadgeState = "disconnected";
       this._lcSelectedProject = null;
       this._lcSelectedShot = null;
+
+      // Phase 3 state
+      this._lcBreakdown = null;        // { description, camera_notes, lighting_notes, vfx_type }
+      this._lcShotList = [];           // cached shots for sequence export
 
       // Add Open Viewport button widget
       const btn = this.addWidget("button", "Open Viewport", "open_viewport", () => {
@@ -126,6 +131,80 @@ app.registerExtension({
       }
     };
 
+    /* ── Phase 3: fetch breakdown data for a shot ─────────────── */
+    nodeType.prototype._lcFetchBreakdown = async function (projectId, shotId) {
+      const apiKeyWidget = this.widgets?.find(w => w.name === "lc_api_key");
+      if (!apiKeyWidget?.value || !projectId || !shotId) return null;
+      try {
+        const res = await fetch(`${LC_API_BASE}/pal/comfy/project/${projectId}`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Api-Key": apiKeyWidget.value,
+          },
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        const shots = data.shots || [];
+        const shot = shots.find(s => s.id === shotId);
+        if (!shot) return null;
+        return {
+          description: shot.description || "",
+          camera_notes: shot.camera_notes || "",
+          lighting_notes: shot.lighting_notes || "",
+          vfx_type: shot.vfx_type || "",
+          scene_state: shot.scene_state || null,
+          camera: shot.camera || null,
+        };
+      } catch (_) {
+        return null;
+      }
+    };
+
+    /* ── Phase 3: pipeline write-back from viewport ────────────── */
+    nodeType.prototype._lcPipelineWriteback = async function () {
+      const apiKeyWidget = this.widgets?.find(w => w.name === "lc_api_key");
+      if (!apiKeyWidget?.value || !this._lcSelectedProject || !this._lcSelectedShot) return false;
+      const state = this._palState || {};
+      const cameraJson = JSON.stringify(state.camera || {});
+      const frameStart = state.frame_start || 1;
+      const frameEnd = state.frame_end || 24;
+      try {
+        const res = await fetch(`${LC_API_BASE}/pal/comfy/project/${this._lcSelectedProject}/pipeline-writeback`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Api-Key": apiKeyWidget.value,
+          },
+          body: JSON.stringify({
+            shot_id: this._lcSelectedShot,
+            camera_json: cameraJson,
+            frame_start: frameStart,
+            frame_end: frameEnd,
+          }),
+        });
+        return res.ok;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    /* ── Phase 3: show toast notification in viewport ──────────── */
+    nodeType.prototype._lcShowToast = function (container, message, isError) {
+      const toast = document.createElement("div");
+      toast.style.cssText = `
+        position:absolute;bottom:24px;left:50%;transform:translateX(-50%);
+        padding:8px 20px;border-radius:6px;font-family:monospace;font-size:11px;
+        z-index:10001;pointer-events:none;transition:opacity .5s;
+        background:${isError ? "rgba(220,50,50,.9)" : "rgba(61,220,132,.9)"};
+        color:#fff;
+      `;
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(() => { toast.style.opacity = "0"; }, 2000);
+      setTimeout(() => { toast.remove(); }, 2600);
+    };
+
     nodeType.prototype._openViewport = function () {
       // Create fullscreen modal
       const modal = document.createElement("div");
@@ -187,6 +266,7 @@ app.registerExtension({
           shotSelect.appendChild(sd);
           if (projSelect.value) {
             const shots = await nodeRef._lcFetchShots(projSelect.value);
+            nodeRef._lcShotList = shots; // Phase 3 — cache for sequence export
             for (const s of shots) {
               const so = document.createElement("option");
               so.value = s.id;
@@ -195,14 +275,76 @@ app.registerExtension({
             }
           }
         });
-        shotSelect.addEventListener("change", () => {
+        // Phase 3 — shot switcher: load breakdown + scene data on shot change
+        shotSelect.addEventListener("change", async () => {
           nodeRef._lcSelectedShot = shotSelect.value || null;
+          if (!shotSelect.value || !projSelect.value) {
+            // Clear breakdown sidebar
+            sidebar.style.width = "0";
+            shotDescBar.style.height = "0";
+            shotDescBar.textContent = "";
+            nodeRef._lcBreakdown = null;
+            return;
+          }
+          // Fetch breakdown data
+          const bd = await nodeRef._lcFetchBreakdown(projSelect.value, shotSelect.value);
+          nodeRef._lcBreakdown = bd;
+          if (bd) {
+            // Show sidebar with breakdown fields
+            sidebar.style.width = "240px";
+            const descEl = document.getElementById("pal-bd-description");
+            const camEl = document.getElementById("pal-bd-camera");
+            const lightEl = document.getElementById("pal-bd-lighting");
+            const vfxEl = document.getElementById("pal-bd-vfx");
+            if (descEl) descEl.textContent = bd.description || "—";
+            if (camEl) camEl.textContent = bd.camera_notes || "—";
+            if (lightEl) lightEl.textContent = bd.lighting_notes || "—";
+            if (vfxEl) vfxEl.textContent = bd.vfx_type || "—";
+
+            // Show shot description below viewport
+            if (bd.description) {
+              shotDescBar.textContent = bd.description;
+              shotDescBar.style.height = "28px";
+              shotDescBar.style.padding = "6px 16px";
+            } else {
+              shotDescBar.style.height = "0";
+              shotDescBar.style.padding = "0 16px";
+            }
+
+            // If shot has scene_state, load it into viewport
+            if (bd.scene_state && window.PALViewport && window.PALViewport.loadState) {
+              window.PALViewport.loadState(bd.scene_state);
+              nodeRef._palState = { ...nodeRef._palState, scene: bd.scene_state };
+            }
+
+            // If shot has camera data, update viewport camera
+            if (bd.camera && window.PALViewport && window.PALViewport.setCamera) {
+              window.PALViewport.setCamera(bd.camera);
+              nodeRef._palState = { ...nodeRef._palState, camera: bd.camera };
+            }
+
+            // Use description to populate the prompt if no scene_state
+            if (!bd.scene_state && bd.description) {
+              const promptWidget = nodeRef.widgets?.find(w => w.name === "prompt");
+              if (promptWidget) promptWidget.value = bd.description;
+              // Also store in state for graph passthrough
+              nodeRef._palState = { ...nodeRef._palState, breakdown: bd };
+            }
+
+            // Store breakdown context in node state for graph flow
+            nodeRef._palState = { ...nodeRef._palState, breakdown: bd };
+          } else {
+            sidebar.style.width = "0";
+            shotDescBar.style.height = "0";
+            shotDescBar.style.padding = "0 16px";
+          }
         });
 
         // Pre-populate shots if a project is already selected
         if (this._lcSelectedProject) {
           (async () => {
             const shots = await this._lcFetchShots(this._lcSelectedProject);
+            this._lcShotList = shots; // Phase 3 — cache for sequence export
             for (const s of shots) {
               const so = document.createElement("option");
               so.value = s.id;
@@ -217,20 +359,93 @@ app.registerExtension({
       // Right side: action buttons
       const headerRight = document.createElement("div");
       headerRight.style.cssText = "display:flex;gap:8px";
+
+      const btnStyle = "padding:4px 12px;border-radius:4px;font-family:monospace;font-size:10px;cursor:pointer;";
+
       headerRight.innerHTML = `
-        <button id="pal-comfy-render" style="padding:4px 12px;background:rgba(245,196,0,.1);border:1px solid rgba(245,196,0,.3);border-radius:4px;color:#f5c400;font-family:monospace;font-size:10px;cursor:pointer">Render All</button>
-        <button id="pal-comfy-save" style="padding:4px 12px;background:#1a1a18;border:1px solid #2a2a26;border-radius:4px;color:#888;font-family:monospace;font-size:10px;cursor:pointer">Save & Close</button>
+        <button id="pal-comfy-render" style="${btnStyle}background:rgba(245,196,0,.1);border:1px solid rgba(245,196,0,.3);color:#f5c400">Render All</button>
       `;
+
+      // Phase 3 — Send to Pipeline button (gated by features)
+      const features = this._lcSession?.features || [];
+      if (features.includes("pipeline_writeback") && this._lcBadgeState === "connected") {
+        const wbBtn = document.createElement("button");
+        wbBtn.id = "pal-comfy-writeback";
+        wbBtn.textContent = "Send to Pipeline";
+        wbBtn.style.cssText = `${btnStyle}background:rgba(61,220,132,.1);border:1px solid rgba(61,220,132,.3);color:#3ddc84`;
+        headerRight.appendChild(wbBtn);
+      }
+
+      // Phase 3 — Export Sequence button (gated by features)
+      if (features.includes("sequence_export") && this._lcBadgeState === "connected") {
+        const seqBtn = document.createElement("button");
+        seqBtn.id = "pal-comfy-sequence";
+        seqBtn.textContent = "Export Sequence";
+        seqBtn.style.cssText = `${btnStyle}background:rgba(100,140,255,.1);border:1px solid rgba(100,140,255,.3);color:#648cff`;
+        headerRight.appendChild(seqBtn);
+      }
+
+      const saveBtn = document.createElement("button");
+      saveBtn.id = "pal-comfy-save";
+      saveBtn.textContent = "Save & Close";
+      saveBtn.style.cssText = `${btnStyle}background:#1a1a18;border:1px solid #2a2a26;color:#888`;
+      headerRight.appendChild(saveBtn);
 
       header.appendChild(headerLeft);
       header.appendChild(headerRight);
       modal.appendChild(header);
 
+      // Phase 3 — viewport + sidebar layout
+      const viewportRow = document.createElement("div");
+      viewportRow.style.cssText = "flex:1;display:flex;overflow:hidden;";
+
       // Viewport container
       const container = document.createElement("div");
       container.id = "pal-comfy-viewport";
       container.style.cssText = "flex:1;position:relative;overflow:hidden;";
-      modal.appendChild(container);
+      viewportRow.appendChild(container);
+
+      // Phase 3 — Breakdown sidebar (shown when a shot is selected)
+      const sidebar = document.createElement("div");
+      sidebar.id = "pal-comfy-sidebar";
+      sidebar.style.cssText = `
+        width:0;overflow:hidden;background:#111110;border-left:1px solid #222;
+        font-family:monospace;font-size:10px;color:#aaa;
+        transition:width .2s;flex-shrink:0;
+      `;
+      sidebar.innerHTML = `
+        <div style="padding:12px;display:flex;flex-direction:column;gap:10px;min-width:220px">
+          <div style="color:#f5c400;font-size:11px;letter-spacing:1px;margin-bottom:4px">SHOT BREAKDOWN</div>
+          <div>
+            <label style="color:#666;display:block;margin-bottom:2px">Description</label>
+            <div id="pal-bd-description" style="color:#ccc;white-space:pre-wrap;max-height:120px;overflow-y:auto;padding:4px 6px;background:#0a0a09;border:1px solid #2a2a26;border-radius:3px">—</div>
+          </div>
+          <div>
+            <label style="color:#666;display:block;margin-bottom:2px">Camera Notes</label>
+            <div id="pal-bd-camera" style="color:#ccc;white-space:pre-wrap;max-height:80px;overflow-y:auto;padding:4px 6px;background:#0a0a09;border:1px solid #2a2a26;border-radius:3px">—</div>
+          </div>
+          <div>
+            <label style="color:#666;display:block;margin-bottom:2px">Lighting Notes</label>
+            <div id="pal-bd-lighting" style="color:#ccc;white-space:pre-wrap;max-height:80px;overflow-y:auto;padding:4px 6px;background:#0a0a09;border:1px solid #2a2a26;border-radius:3px">—</div>
+          </div>
+          <div>
+            <label style="color:#666;display:block;margin-bottom:2px">VFX Type</label>
+            <div id="pal-bd-vfx" style="color:#ccc;padding:4px 6px;background:#0a0a09;border:1px solid #2a2a26;border-radius:3px">—</div>
+          </div>
+        </div>
+      `;
+      viewportRow.appendChild(sidebar);
+      modal.appendChild(viewportRow);
+
+      // Phase 3 — Shot description bar below viewport
+      const shotDescBar = document.createElement("div");
+      shotDescBar.id = "pal-comfy-shot-desc";
+      shotDescBar.style.cssText = `
+        height:0;overflow:hidden;background:#111110;border-top:1px solid #222;
+        font-family:monospace;font-size:10px;color:#999;padding:0 16px;
+        transition:height .2s;flex-shrink:0;
+      `;
+      modal.appendChild(shotDescBar);
 
       document.body.appendChild(modal);
 
@@ -265,6 +480,95 @@ app.registerExtension({
           this._updateSummary();
         }
       };
+
+      // Phase 3 — Send to Pipeline handler
+      const wbBtnEl = document.getElementById("pal-comfy-writeback");
+      if (wbBtnEl) {
+        wbBtnEl.onclick = async () => {
+          if (!this._lcSelectedProject || !this._lcSelectedShot) {
+            this._lcShowToast(container, "Select a project and shot first", true);
+            return;
+          }
+          wbBtnEl.disabled = true;
+          wbBtnEl.textContent = "Sending...";
+          const ok = await this._lcPipelineWriteback();
+          wbBtnEl.disabled = false;
+          wbBtnEl.textContent = "Send to Pipeline";
+          this._lcShowToast(container, ok ? "Sent to Pipeline" : "Write-back failed", !ok);
+        };
+      }
+
+      // Phase 3 — Export Sequence handler
+      const seqBtnEl = document.getElementById("pal-comfy-sequence");
+      if (seqBtnEl) {
+        seqBtnEl.onclick = async () => {
+          if (!this._lcSelectedProject) {
+            this._lcShowToast(container, "Select a project first", true);
+            return;
+          }
+          const shots = this._lcShotList.length ? this._lcShotList : await this._lcFetchShots(this._lcSelectedProject);
+          if (!shots.length) {
+            this._lcShowToast(container, "No shots found in project", true);
+            return;
+          }
+
+          seqBtnEl.disabled = true;
+          const sequence = [];
+          const total = shots.length;
+
+          // Progress indicator
+          const progress = document.createElement("div");
+          progress.style.cssText = `
+            position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+            padding:16px 24px;background:rgba(0,0,0,.85);border:1px solid #333;
+            border-radius:8px;font-family:monospace;font-size:12px;color:#ccc;z-index:10002;
+          `;
+          container.appendChild(progress);
+
+          for (let i = 0; i < shots.length; i++) {
+            const shot = shots[i];
+            progress.textContent = `Exporting ${i + 1} / ${total}: ${shot.name || shot.id}`;
+
+            // Load shot scene state
+            const bd = await this._lcFetchBreakdown(this._lcSelectedProject, shot.id);
+            if (bd?.scene_state && window.PALViewport?.loadState) {
+              window.PALViewport.loadState(bd.scene_state);
+            }
+            if (bd?.camera && window.PALViewport?.setCamera) {
+              window.PALViewport.setCamera(bd.camera);
+            }
+
+            // Render passes for this shot
+            let passes = { beauty: null, depth: null, normals: null };
+            if (window.PALViewport?.renderPasses) {
+              passes = window.PALViewport.renderPasses();
+              // Watermark free tier
+              const plan = this._lcSession?.plan || "free";
+              if (!PAID_PLANS.has(plan) && passes.beauty) {
+                passes.beauty = this._lcApplyWatermark(passes.beauty);
+              }
+            }
+
+            sequence.push({
+              shot_id: shot.id,
+              beauty_b64: passes.beauty || "",
+              depth_b64: passes.depth || "",
+              normal_b64: passes.normals || "",
+              camera_json: JSON.stringify(bd?.camera || {}),
+            });
+
+            // Yield to UI
+            await new Promise(r => setTimeout(r, 50));
+          }
+
+          progress.remove();
+          seqBtnEl.disabled = false;
+
+          // Store sequence in state for Python node output
+          this._palState.sequence = sequence;
+          this._lcShowToast(container, `Exported ${sequence.length} shots`, false);
+        };
+      }
 
       // Save & Close
       document.getElementById("pal-comfy-save").onclick = () => {
