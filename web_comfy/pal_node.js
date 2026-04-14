@@ -449,48 +449,74 @@ app.registerExtension({
 
       document.body.appendChild(modal);
 
-      // Load Three.js bundle dynamically then init viewport
-      const _initViewport = () => {
+      // Load full PAL viewport via iframe (uses the live PAL web app)
+      const apiKeyWidget = this.widgets?.find(w => w.name === "lc_api_key");
+      const palToken = apiKeyWidget?.value || "";
+      const palUrl = palToken
+        ? `${LC_API_BASE}/pal?comfy=1&token=${encodeURIComponent(palToken)}`
+        : `${LC_API_BASE}/pal?comfy=1`;
+
+      const iframe = document.createElement("iframe");
+      iframe.src = palUrl;
+      iframe.style.cssText = "width:100%;height:100%;border:none;";
+      container.appendChild(iframe);
+
+      // Listen for messages from PAL iframe (scene state, render passes)
+      const _iframeHandler = (e) => {
+        if (e.source !== iframe.contentWindow) return;
+        const msg = e.data;
+        if (!msg || !msg.type) return;
+        if (msg.type === "pal:state") {
+          this._palState = msg.state || {};
+        }
+        if (msg.type === "pal:render") {
+          this._palState.beauty_b64 = msg.beauty;
+          this._palState.depth_b64 = msg.depth;
+          this._palState.normal_b64 = msg.normals;
+          this._palRendered = true;
+          this._updateSummary();
+        }
+      };
+      window.addEventListener("message", _iframeHandler);
+      this._iframeCleanup = () => window.removeEventListener("message", _iframeHandler);
+
+      // Also keep the standalone bundle path as fallback
+      const _initStandaloneViewport = () => {
         if (window.PALViewport && window.PALViewport.init) {
-          const existingState = this._palState || {};
+          container.innerHTML = "";
           window.PALViewport.init(container, {
-            state: existingState,
+            state: this._palState || {},
             onStateChange: (state) => { this._palState = state; },
           });
-        } else {
-          container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:monospace;font-size:12px;color:#555">
-            PAL viewport failed to initialise.
-          </div>`;
         }
       };
 
-      if (window.PALViewport) {
-        _initViewport();
-      } else {
+      // If iframe fails to load (no network / no auth), fall back to standalone
+      iframe.onerror = () => {
         const bundleSrc = "/extensions/comfyui-lenscowboy-pal/pal_three_bundle.js";
-        console.log("[PAL] Loading Three.js bundle from:", bundleSrc);
+        if (window.PALViewport) { _initStandaloneViewport(); return; }
         const script = document.createElement("script");
         script.src = bundleSrc;
-        script.onload = () => { console.log("[PAL] Bundle loaded, PALViewport:", !!window.PALViewport); _initViewport(); };
+        script.onload = () => _initStandaloneViewport();
         script.onerror = () => {
           container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:monospace;font-size:12px;color:#f87171">
-            Failed to load pal_three_bundle.js — check browser console.
+            Failed to load PAL viewport.
           </div>`;
         };
         document.head.appendChild(script);
       }
 
-      // Render All — capture passes (+ Phase 2 watermark for free tier)
+      // Render All — request passes from iframe or standalone viewport
       document.getElementById("pal-comfy-render").onclick = () => {
-        if (window.PALViewport && window.PALViewport.renderPasses) {
+        if (iframe && iframe.contentWindow) {
+          // Ask PAL iframe to render passes
+          iframe.contentWindow.postMessage({ type: "pal:render-request" }, "*");
+        } else if (window.PALViewport && window.PALViewport.renderPasses) {
           const passes = window.PALViewport.renderPasses();
-
-          // Phase 2 — watermark on free tier
           const plan = this._lcSession?.plan || "free";
           if (!PAID_PLANS.has(plan) && passes.beauty) {
             passes.beauty = this._lcApplyWatermark(passes.beauty);
           }
-
           this._palState.beauty_b64 = passes.beauty;
           this._palState.depth_b64 = passes.depth;
           this._palState.normal_b64 = passes.normals;
@@ -627,13 +653,20 @@ app.registerExtension({
     };
 
     nodeType.prototype._saveAndClose = function (modal) {
+      // Request state from iframe before closing
+      const iframe = modal.querySelector("iframe");
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.postMessage({ type: "pal:get-state" }, "*");
+      }
+
       // Serialise scene state to hidden widget
       const stateJson = JSON.stringify(this._palState || {});
       const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
       if (widget) widget.value = stateJson;
       this._updateSummary();
 
-      // Cleanup viewport
+      // Cleanup
+      if (this._iframeCleanup) { this._iframeCleanup(); this._iframeCleanup = null; }
       if (window.PALViewport && window.PALViewport.destroy) {
         window.PALViewport.destroy();
       }
