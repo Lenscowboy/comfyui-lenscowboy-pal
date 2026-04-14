@@ -1,0 +1,736 @@
+{
+  "lenses": [
+    {
+      "make": "Zeiss",
+      "series": "Supreme Prime",
+      "focal_length_mm": 18,
+      "max_aperture": 1.5,
+      "close_focus_m": 0.35,
+      "image_circle_mm": 46.3,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "Supreme Prime",
+      "focal_length_mm": 21,
+      "max_aperture": 1.5,
+      "close_focus_m": 0.35,
+      "image_circle_mm": 46.3,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "Supreme Prime",
+      "focal_length_mm": 25,
+      "max_aperture": 1.5,
+      "close_focus_m": 0.26,
+      "image_circle_mm": 46.3,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "Supreme Prime",
+      "focal_length_mm": 29,
+      "max_aperture": 1.5,
+      "close_focus_m": 0.32,
+      "image_circle_mm": 46.3,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "Supreme Prime",
+      "focal_length_mm": 35,
+      "max_aperture": 1.5,
+      "close_focus_m": 0.35,
+      "image_circle_mm": 46.3,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "Supreme Prime",
+      "focal_length_mm": 40,
+      "max_aperture": 1.5,
+      "close_focus_m": 0.38,
+      "image_circle_mm": 46.3,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "Supreme Prime",
+      "focal_length_mm": 50,
+      "max_aperture": 1.5,
+      "close_focus_m": 0.45,
+      "image_circle_mm": 46.3,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "Supreme Prime",
+      "focal_length_mm": 65,
+      "max_aperture": 1.5,
+      "close_focus_m": 0.50,
+      "image_circle_mm": 46.3,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "Supreme Prime",
+      "focal_length_mm": 85,
+      "max_aperture": 1.5,
+      "close_focus_m": 0.60,
+      "image_circle_mm": 46.3,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "Supreme Prime",
+      "focal_length_mm": 100,
+      "max_aperture": 1.5,
+      "close_focus_m": 0.72,
+      "image_circle_mm": 46.3,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "Supreme Prime",
+      "focal_length_mm": 135,
+      "max_aperture": 1.5,
+      "close_focus_m": 1.00,
+      "image_circle_mm": 46.3,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "Supreme Prime",
+      "focal_length_mm": 150,
+      "max_aperture": 1.8,
+      "close_focus_m": 1.20,
+      "image_circle_mm": 46.3,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "Supreme Prime",
+      "focal_length_mm": 200,
+      "max_aperture": 2.2,
+      "close_focus_m": 1.50,
+      "image_circle_mm": 46.3,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 12,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.30,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 14,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.30,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 16,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.30,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 18,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.30,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 21,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.28,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 25,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.25,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 27,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.28,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 32,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.30,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 35,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.30,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 40,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.40,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 50,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.45,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 65,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.50,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 75,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.60,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 100,
+      "max_aperture": 1.3,
+      "close_focus_m": 0.72,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 135,
+      "max_aperture": 1.3,
+      "close_focus_m": 1.00,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+    {
+      "make": "ARRI/Zeiss",
+      "series": "Master Prime",
+      "focal_length_mm": 150,
+      "max_aperture": 1.3,
+      "close_focus_m": 1.20,
+      "image_circle_mm": 33.0,
+      "covers": ["Super35"]
+    },
+
+    {
+      "make": "Cooke",
+      "series": "S7/i",
+      "focal_length_mm": 18,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.25,
+      "image_circle_mm": 46.31,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Cooke",
+      "series": "S7/i",
+      "focal_length_mm": 21,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.25,
+      "image_circle_mm": 46.31,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Cooke",
+      "series": "S7/i",
+      "focal_length_mm": 25,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.25,
+      "image_circle_mm": 46.31,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Cooke",
+      "series": "S7/i",
+      "focal_length_mm": 32,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.30,
+      "image_circle_mm": 46.31,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Cooke",
+      "series": "S7/i",
+      "focal_length_mm": 40,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.35,
+      "image_circle_mm": 46.31,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Cooke",
+      "series": "S7/i",
+      "focal_length_mm": 50,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.46,
+      "image_circle_mm": 46.31,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Cooke",
+      "series": "S7/i",
+      "focal_length_mm": 75,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.61,
+      "image_circle_mm": 46.31,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Cooke",
+      "series": "S7/i",
+      "focal_length_mm": 100,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.91,
+      "image_circle_mm": 46.31,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+    {
+      "make": "Cooke",
+      "series": "S7/i",
+      "focal_length_mm": 135,
+      "max_aperture": 2.0,
+      "close_focus_m": 1.07,
+      "image_circle_mm": 46.31,
+      "covers": ["Full Frame", "VistaVision"]
+    },
+
+    {
+      "make": "Leica",
+      "series": "Thalia",
+      "focal_length_mm": 24,
+      "max_aperture": 3.6,
+      "close_focus_m": 0.35,
+      "image_circle_mm": 60.0,
+      "covers": ["Full Frame", "VistaVision", "65mm"]
+    },
+    {
+      "make": "Leica",
+      "series": "Thalia",
+      "focal_length_mm": 29,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.35,
+      "image_circle_mm": 60.0,
+      "covers": ["Full Frame", "VistaVision", "65mm"]
+    },
+    {
+      "make": "Leica",
+      "series": "Thalia",
+      "focal_length_mm": 35,
+      "max_aperture": 2.6,
+      "close_focus_m": 0.35,
+      "image_circle_mm": 60.0,
+      "covers": ["Full Frame", "VistaVision", "65mm"]
+    },
+    {
+      "make": "Leica",
+      "series": "Thalia",
+      "focal_length_mm": 45,
+      "max_aperture": 2.6,
+      "close_focus_m": 0.45,
+      "image_circle_mm": 60.0,
+      "covers": ["Full Frame", "VistaVision", "65mm"]
+    },
+    {
+      "make": "Leica",
+      "series": "Thalia",
+      "focal_length_mm": 55,
+      "max_aperture": 2.8,
+      "close_focus_m": 0.50,
+      "image_circle_mm": 60.0,
+      "covers": ["Full Frame", "VistaVision", "65mm"]
+    },
+    {
+      "make": "Leica",
+      "series": "Thalia",
+      "focal_length_mm": 70,
+      "max_aperture": 2.6,
+      "close_focus_m": 0.60,
+      "image_circle_mm": 60.0,
+      "covers": ["Full Frame", "VistaVision", "65mm"]
+    },
+    {
+      "make": "Leica",
+      "series": "Thalia",
+      "focal_length_mm": 100,
+      "max_aperture": 2.2,
+      "close_focus_m": 0.80,
+      "image_circle_mm": 60.0,
+      "covers": ["Full Frame", "VistaVision", "65mm"]
+    },
+    {
+      "make": "Leica",
+      "series": "Thalia",
+      "focal_length_mm": 120,
+      "max_aperture": 2.6,
+      "close_focus_m": 1.00,
+      "image_circle_mm": 60.0,
+      "covers": ["Full Frame", "VistaVision", "65mm"]
+    },
+    {
+      "make": "Leica",
+      "series": "Thalia",
+      "focal_length_mm": 180,
+      "max_aperture": 3.6,
+      "close_focus_m": 1.50,
+      "image_circle_mm": 60.0,
+      "covers": ["Full Frame", "VistaVision", "65mm"]
+    },
+
+    {
+      "make": "Sigma",
+      "series": "Cine Art",
+      "focal_length_mm": 14,
+      "max_aperture": 1.8,
+      "close_focus_m": 0.27,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Sigma",
+      "series": "Cine Art",
+      "focal_length_mm": 20,
+      "max_aperture": 1.4,
+      "close_focus_m": 0.28,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Sigma",
+      "series": "Cine Art",
+      "focal_length_mm": 24,
+      "max_aperture": 1.4,
+      "close_focus_m": 0.25,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Sigma",
+      "series": "Cine Art",
+      "focal_length_mm": 35,
+      "max_aperture": 1.4,
+      "close_focus_m": 0.30,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Sigma",
+      "series": "Cine Art",
+      "focal_length_mm": 50,
+      "max_aperture": 1.4,
+      "close_focus_m": 0.40,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Sigma",
+      "series": "Cine Art",
+      "focal_length_mm": 85,
+      "max_aperture": 1.4,
+      "close_focus_m": 0.85,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Sigma",
+      "series": "Cine Art",
+      "focal_length_mm": 105,
+      "max_aperture": 1.4,
+      "close_focus_m": 1.00,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Sigma",
+      "series": "Cine Art",
+      "focal_length_mm": 135,
+      "max_aperture": 1.8,
+      "close_focus_m": 0.88,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+
+    {
+      "make": "Atlas",
+      "series": "Orion Anamorphic",
+      "focal_length_mm": 32,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.46,
+      "image_circle_mm": 31.1,
+      "covers": ["Super35"],
+      "squeeze_factor": 2.0
+    },
+    {
+      "make": "Atlas",
+      "series": "Orion Anamorphic",
+      "focal_length_mm": 40,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.61,
+      "image_circle_mm": 31.1,
+      "covers": ["Super35"],
+      "squeeze_factor": 2.0
+    },
+    {
+      "make": "Atlas",
+      "series": "Orion Anamorphic",
+      "focal_length_mm": 50,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.76,
+      "image_circle_mm": 31.1,
+      "covers": ["Super35"],
+      "squeeze_factor": 2.0
+    },
+    {
+      "make": "Atlas",
+      "series": "Orion Anamorphic",
+      "focal_length_mm": 65,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.91,
+      "image_circle_mm": 31.1,
+      "covers": ["Super35"],
+      "squeeze_factor": 2.0
+    },
+    {
+      "make": "Atlas",
+      "series": "Orion Anamorphic",
+      "focal_length_mm": 80,
+      "max_aperture": 2.0,
+      "close_focus_m": 1.07,
+      "image_circle_mm": 31.1,
+      "covers": ["Super35"],
+      "squeeze_factor": 2.0
+    },
+    {
+      "make": "Atlas",
+      "series": "Orion Anamorphic",
+      "focal_length_mm": 100,
+      "max_aperture": 2.0,
+      "close_focus_m": 1.22,
+      "image_circle_mm": 31.1,
+      "covers": ["Super35"],
+      "squeeze_factor": 2.0
+    },
+
+    {
+      "make": "Hawk",
+      "series": "V-Series Anamorphic",
+      "focal_length_mm": 35,
+      "max_aperture": 2.2,
+      "close_focus_m": 0.46,
+      "image_circle_mm": 31.1,
+      "covers": ["Super35"],
+      "squeeze_factor": 2.0
+    },
+    {
+      "make": "Hawk",
+      "series": "V-Series Anamorphic",
+      "focal_length_mm": 45,
+      "max_aperture": 2.2,
+      "close_focus_m": 0.53,
+      "image_circle_mm": 31.1,
+      "covers": ["Super35"],
+      "squeeze_factor": 2.0
+    },
+    {
+      "make": "Hawk",
+      "series": "V-Series Anamorphic",
+      "focal_length_mm": 55,
+      "max_aperture": 2.2,
+      "close_focus_m": 0.61,
+      "image_circle_mm": 31.1,
+      "covers": ["Super35"],
+      "squeeze_factor": 2.0
+    },
+    {
+      "make": "Hawk",
+      "series": "V-Series Anamorphic",
+      "focal_length_mm": 65,
+      "max_aperture": 2.2,
+      "close_focus_m": 0.76,
+      "image_circle_mm": 31.1,
+      "covers": ["Super35"],
+      "squeeze_factor": 2.0
+    },
+    {
+      "make": "Hawk",
+      "series": "V-Series Anamorphic",
+      "focal_length_mm": 80,
+      "max_aperture": 2.2,
+      "close_focus_m": 0.91,
+      "image_circle_mm": 31.1,
+      "covers": ["Super35"],
+      "squeeze_factor": 2.0
+    },
+    {
+      "make": "Hawk",
+      "series": "V-Series Anamorphic",
+      "focal_length_mm": 100,
+      "max_aperture": 2.8,
+      "close_focus_m": 1.07,
+      "image_circle_mm": 31.1,
+      "covers": ["Super35"],
+      "squeeze_factor": 2.0
+    },
+    {
+      "make": "Hawk",
+      "series": "V-Series Anamorphic",
+      "focal_length_mm": 135,
+      "max_aperture": 3.0,
+      "close_focus_m": 1.22,
+      "image_circle_mm": 31.1,
+      "covers": ["Super35"],
+      "squeeze_factor": 2.0
+    },
+
+    {
+      "make": "Zeiss",
+      "series": "CP.3",
+      "focal_length_mm": 15,
+      "max_aperture": 2.9,
+      "close_focus_m": 0.25,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "CP.3",
+      "focal_length_mm": 18,
+      "max_aperture": 2.9,
+      "close_focus_m": 0.30,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "CP.3",
+      "focal_length_mm": 21,
+      "max_aperture": 2.9,
+      "close_focus_m": 0.24,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "CP.3",
+      "focal_length_mm": 25,
+      "max_aperture": 2.1,
+      "close_focus_m": 0.17,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "CP.3",
+      "focal_length_mm": 28,
+      "max_aperture": 2.1,
+      "close_focus_m": 0.22,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "CP.3",
+      "focal_length_mm": 35,
+      "max_aperture": 2.1,
+      "close_focus_m": 0.30,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "CP.3",
+      "focal_length_mm": 50,
+      "max_aperture": 2.1,
+      "close_focus_m": 0.45,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "CP.3",
+      "focal_length_mm": 85,
+      "max_aperture": 2.1,
+      "close_focus_m": 1.00,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "CP.3",
+      "focal_length_mm": 100,
+      "max_aperture": 2.1,
+      "close_focus_m": 0.90,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+    {
+      "make": "Zeiss",
+      "series": "CP.3",
+      "focal_length_mm": 135,
+      "max_aperture": 2.1,
+      "close_focus_m": 1.00,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    },
+
+    {
+      "make": "Custom",
+      "series": "Custom",
+      "focal_length_mm": 50,
+      "max_aperture": 2.0,
+      "close_focus_m": 0.45,
+      "image_circle_mm": 43.3,
+      "covers": ["Full Frame"]
+    }
+  ]
+}

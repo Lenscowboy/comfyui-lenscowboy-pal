@@ -449,80 +449,39 @@ app.registerExtension({
 
       document.body.appendChild(modal);
 
-      // Load full PAL viewport via iframe (uses the live PAL web app)
-      const apiKeyWidget = this.widgets?.find(w => w.name === "lc_api_key");
-      const projectWidget = this.widgets?.find(w => w.name === "lc_project_id");
-      const shotWidget = this.widgets?.find(w => w.name === "lc_shot_id");
-      const palToken = apiKeyWidget?.value || "";
-      const palProject = projectWidget?.value || "";
-      let palUrl = `${LC_API_BASE}/pal?comfy=1`;
-      if (palToken) palUrl += `&token=${encodeURIComponent(palToken)}`;
-      if (palProject) palUrl += `&project=${encodeURIComponent(palProject)}`;
-      // Pass session data if available (project name, client_id)
-      if (this._lcSession) {
-        const proj = this._lcSession.project_list?.find(p => p.id === palProject);
-        if (proj) {
-          palUrl += `&project_name=${encodeURIComponent(proj.name || palProject)}`;
-          if (proj.client_id) palUrl += `&client_id=${encodeURIComponent(proj.client_id)}`;
-        }
-      }
-
-      const iframe = document.createElement("iframe");
-      iframe.src = palUrl;
-      iframe.style.cssText = "width:100%;height:100%;border:none;";
-      container.appendChild(iframe);
-
-      // Listen for messages from PAL iframe (scene state, render passes)
-      const _iframeHandler = (e) => {
-        if (e.source !== iframe.contentWindow) return;
-        const msg = e.data;
-        if (!msg || !msg.type) return;
-        if (msg.type === "pal:state") {
-          this._palState = msg.state || {};
-        }
-        if (msg.type === "pal:render") {
-          this._palState.beauty_b64 = msg.beauty;
-          this._palState.depth_b64 = msg.depth;
-          this._palState.normal_b64 = msg.normals;
-          this._palRendered = true;
-          this._updateSummary();
-        }
-      };
-      window.addEventListener("message", _iframeHandler);
-      this._iframeCleanup = () => window.removeEventListener("message", _iframeHandler);
-
-      // Also keep the standalone bundle path as fallback
-      const _initStandaloneViewport = () => {
+      // Load PAL viewport from bundled Three.js (standalone, no server needed)
+      const _initViewport = () => {
         if (window.PALViewport && window.PALViewport.init) {
-          container.innerHTML = "";
           window.PALViewport.init(container, {
             state: this._palState || {},
             onStateChange: (state) => { this._palState = state; },
           });
+        } else {
+          container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:monospace;font-size:12px;color:#555">
+            PAL viewport failed to initialise.
+          </div>`;
         }
       };
 
-      // If iframe fails to load (no network / no auth), fall back to standalone
-      iframe.onerror = () => {
+      if (window.PALViewport) {
+        _initViewport();
+      } else {
         const bundleSrc = "/extensions/comfyui-lenscowboy-pal/pal_three_bundle.js";
-        if (window.PALViewport) { _initStandaloneViewport(); return; }
+        console.log("[PAL] Loading viewport bundle from:", bundleSrc);
         const script = document.createElement("script");
         script.src = bundleSrc;
-        script.onload = () => _initStandaloneViewport();
+        script.onload = () => { console.log("[PAL] Bundle loaded"); _initViewport(); };
         script.onerror = () => {
           container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:monospace;font-size:12px;color:#f87171">
-            Failed to load PAL viewport.
+            Failed to load PAL viewport bundle.
           </div>`;
         };
         document.head.appendChild(script);
       }
 
-      // Render All — request passes from iframe or standalone viewport
+      // Render All — capture passes from standalone viewport
       document.getElementById("pal-comfy-render").onclick = () => {
-        if (iframe && iframe.contentWindow) {
-          // Ask PAL iframe to render passes
-          iframe.contentWindow.postMessage({ type: "pal:render-request" }, "*");
-        } else if (window.PALViewport && window.PALViewport.renderPasses) {
+        if (window.PALViewport && window.PALViewport.renderPasses) {
           const passes = window.PALViewport.renderPasses();
           const plan = this._lcSession?.plan || "free";
           if (!PAID_PLANS.has(plan) && passes.beauty) {
@@ -664,10 +623,10 @@ app.registerExtension({
     };
 
     nodeType.prototype._saveAndClose = function (modal) {
-      // Request state from iframe before closing
-      const iframe = modal.querySelector("iframe");
-      if (iframe?.contentWindow) {
-        iframe.contentWindow.postMessage({ type: "pal:get-state" }, "*");
+      // Capture final state from viewport
+      if (window.PALViewport && window.PALViewport.getState) {
+        const state = window.PALViewport.getState();
+        Object.assign(this._palState, state);
       }
 
       // Serialise scene state to hidden widget
@@ -677,7 +636,6 @@ app.registerExtension({
       this._updateSummary();
 
       // Cleanup
-      if (this._iframeCleanup) { this._iframeCleanup(); this._iframeCleanup = null; }
       if (window.PALViewport && window.PALViewport.destroy) {
         window.PALViewport.destroy();
       }
