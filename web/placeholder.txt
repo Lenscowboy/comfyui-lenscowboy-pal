@@ -1,0 +1,3 @@
+This directory is populated by git subtree from lenscowboy-pipeline-saas/pal/web/
+Do not edit files here directly — changes should be made in the pipeline-saas repo
+and pushed via: git subtree push --prefix=pal/web

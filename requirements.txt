@@ -1,0 +1,3 @@
+# PAL Layout Node for ComfyUI
+# No external dependencies beyond ComfyUI's own (torch, numpy, PIL)
+# Three.js viewport runs client-side — no server-side 3D libraries needed
