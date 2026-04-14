@@ -467,14 +467,7 @@ app.registerExtension({
       if (window.PALViewport) {
         _initViewport();
       } else {
-        // Find the extension's base URL from this script's location
-        const scripts = document.querySelectorAll('script[src*="pal_node"]');
-        let baseUrl = "./extensions/comfyui-lenscowboy-pal";
-        for (const s of scripts) {
-          const idx = s.src.indexOf("pal_node");
-          if (idx > 0) { baseUrl = s.src.substring(0, idx); break; }
-        }
-        const bundleSrc = baseUrl + "pal_three_bundle.js";
+        const bundleSrc = "/extensions/comfyui-lenscowboy-pal/pal_three_bundle.js";
         console.log("[PAL] Loading Three.js bundle from:", bundleSrc);
         const script = document.createElement("script");
         script.src = bundleSrc;
