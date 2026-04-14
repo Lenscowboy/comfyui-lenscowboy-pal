@@ -449,17 +449,42 @@ app.registerExtension({
 
       document.body.appendChild(modal);
 
-      // Initialise Three.js viewport (from bundled PALViewport)
-      if (window.PALViewport && window.PALViewport.init) {
-        const existingState = this._palState || {};
-        window.PALViewport.init(container, {
-          state: existingState,
-          onStateChange: (state) => { this._palState = state; },
-        });
+      // Load Three.js bundle dynamically then init viewport
+      const _initViewport = () => {
+        if (window.PALViewport && window.PALViewport.init) {
+          const existingState = this._palState || {};
+          window.PALViewport.init(container, {
+            state: existingState,
+            onStateChange: (state) => { this._palState = state; },
+          });
+        } else {
+          container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:monospace;font-size:12px;color:#555">
+            PAL viewport failed to initialise.
+          </div>`;
+        }
+      };
+
+      if (window.PALViewport) {
+        _initViewport();
       } else {
-        container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:monospace;font-size:12px;color:#555">
-          PAL viewport bundle not loaded. Ensure pal_three_bundle.js is in the web/ directory.
-        </div>`;
+        // Find the extension's base URL from this script's location
+        const scripts = document.querySelectorAll('script[src*="pal_node"]');
+        let baseUrl = "./extensions/comfyui-lenscowboy-pal";
+        for (const s of scripts) {
+          const idx = s.src.indexOf("pal_node");
+          if (idx > 0) { baseUrl = s.src.substring(0, idx); break; }
+        }
+        const bundleSrc = baseUrl + "pal_three_bundle.js";
+        console.log("[PAL] Loading Three.js bundle from:", bundleSrc);
+        const script = document.createElement("script");
+        script.src = bundleSrc;
+        script.onload = () => { console.log("[PAL] Bundle loaded, PALViewport:", !!window.PALViewport); _initViewport(); };
+        script.onerror = () => {
+          container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:monospace;font-size:12px;color:#f87171">
+            Failed to load pal_three_bundle.js — check browser console.
+          </div>`;
+        };
+        document.head.appendChild(script);
       }
 
       // Render All — capture passes (+ Phase 2 watermark for free tier)
