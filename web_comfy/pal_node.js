@@ -24,7 +24,7 @@ const BADGE = {
 };
 
 /* ── Paid plan names that skip the watermark ─────────────────────── */
-const PAID_PLANS = new Set(["node_pro", "creator", "studio", "enterprise"]);
+const PAID_PLANS = new Set(["node_creator", "creator", "influencer", "pro", "studio", "enterprise"]);
 
 app.registerExtension({
   name: EXT_NAME,
