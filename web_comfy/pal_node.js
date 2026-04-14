@@ -451,10 +451,12 @@ app.registerExtension({
 
       // Load full PAL viewport via iframe (uses the live PAL web app)
       const apiKeyWidget = this.widgets?.find(w => w.name === "lc_api_key");
+      const projectWidget = this.widgets?.find(w => w.name === "lc_project_id");
       const palToken = apiKeyWidget?.value || "";
-      const palUrl = palToken
-        ? `${LC_API_BASE}/pal?comfy=1&token=${encodeURIComponent(palToken)}`
-        : `${LC_API_BASE}/pal?comfy=1`;
+      const palProject = projectWidget?.value || "";
+      let palUrl = `${LC_API_BASE}/pal?comfy=1`;
+      if (palToken) palUrl += `&token=${encodeURIComponent(palToken)}`;
+      if (palProject) palUrl += `&project=${encodeURIComponent(palProject)}`;
 
       const iframe = document.createElement("iframe");
       iframe.src = palUrl;
