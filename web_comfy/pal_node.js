@@ -452,11 +452,20 @@ app.registerExtension({
       // Load full PAL viewport via iframe (uses the live PAL web app)
       const apiKeyWidget = this.widgets?.find(w => w.name === "lc_api_key");
       const projectWidget = this.widgets?.find(w => w.name === "lc_project_id");
+      const shotWidget = this.widgets?.find(w => w.name === "lc_shot_id");
       const palToken = apiKeyWidget?.value || "";
       const palProject = projectWidget?.value || "";
       let palUrl = `${LC_API_BASE}/pal?comfy=1`;
       if (palToken) palUrl += `&token=${encodeURIComponent(palToken)}`;
       if (palProject) palUrl += `&project=${encodeURIComponent(palProject)}`;
+      // Pass session data if available (project name, client_id)
+      if (this._lcSession) {
+        const proj = this._lcSession.project_list?.find(p => p.id === palProject);
+        if (proj) {
+          palUrl += `&project_name=${encodeURIComponent(proj.name || palProject)}`;
+          if (proj.client_id) palUrl += `&client_id=${encodeURIComponent(proj.client_id)}`;
+        }
+      }
 
       const iframe = document.createElement("iframe");
       iframe.src = palUrl;
