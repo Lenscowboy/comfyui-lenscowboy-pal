@@ -91,10 +91,55 @@ export function init(container, options = {}) {
   _onStateChange = options.onStateChange || null;
   _destroyed = false;
 
-  // Create canvas
+  // Build UI layout: left panel + viewport + right panel
+  const shell = document.createElement('div');
+  shell.style.cssText = 'display:flex;width:100%;height:100%;background:#0e0e0c;font-family:monospace;';
+
+  // Left panel — objects + proxy library
+  const leftPanel = document.createElement('div');
+  leftPanel.id = 'pal-left-panel';
+  leftPanel.style.cssText = 'width:220px;background:#111110;border-right:1px solid #2a2a26;display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0;font-size:9px;color:#888;';
+  leftPanel.innerHTML = `
+    <div style="padding:8px 12px;border-bottom:1px solid #2a2a26;font-size:8px;letter-spacing:1px;color:#f5c400;text-transform:uppercase">Objects</div>
+    <div id="pal-obj-list" style="flex:1;overflow-y:auto;padding:4px 0"></div>
+    <div style="padding:8px 12px;border-top:1px solid #2a2a26">
+      <div style="font-size:8px;letter-spacing:1px;color:#f5c400;text-transform:uppercase;margin-bottom:6px">Add Proxy</div>
+      <select id="pal-proxy-select" style="width:100%;background:#1a1a18;border:1px solid #2a2a26;color:#d0d0c8;font-size:8px;padding:3px 4px;border-radius:2px;margin-bottom:4px"></select>
+      <button id="pal-add-proxy-btn" style="width:100%;padding:4px;background:#1a1a18;border:1px solid rgba(245,196,0,.3);border-radius:3px;color:#f5c400;font-size:8px;cursor:pointer">+ Add to Scene</button>
+    </div>
+  `;
+  shell.appendChild(leftPanel);
+
+  // Canvas viewport
+  const viewportWrap = document.createElement('div');
+  viewportWrap.style.cssText = 'flex:1;position:relative;overflow:hidden;';
   const canvas = document.createElement('canvas');
   canvas.style.cssText = 'display:block;width:100%;height:100%;';
-  container.appendChild(canvas);
+  viewportWrap.appendChild(canvas);
+  shell.appendChild(viewportWrap);
+
+  // Right panel — shot info + camera
+  const rightPanel = document.createElement('div');
+  rightPanel.id = 'pal-right-panel';
+  rightPanel.style.cssText = 'width:200px;background:#111110;border-left:1px solid #2a2a26;display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0;font-size:9px;color:#888;';
+  rightPanel.innerHTML = `
+    <div style="padding:8px 12px;border-bottom:1px solid #2a2a26;font-size:8px;letter-spacing:1px;color:#f5c400;text-transform:uppercase">Camera</div>
+    <div style="padding:8px 12px">
+      <div style="margin-bottom:6px"><span style="color:#555;width:40px;display:inline-block">FOV</span> <span id="pal-cam-fov" style="color:#d0d0c8">39.6°</span></div>
+      <div style="margin-bottom:6px"><span style="color:#555;width:40px;display:inline-block">Pos</span> <span id="pal-cam-pos" style="color:#d0d0c8;font-size:8px">0, 1.65, 5</span></div>
+    </div>
+    <div style="padding:8px 12px;border-top:1px solid #2a2a26;font-size:8px;letter-spacing:1px;color:#f5c400;text-transform:uppercase">Scene</div>
+    <div style="padding:8px 12px">
+      <div id="pal-scene-info" style="color:#666">No objects</div>
+    </div>
+    <div style="flex:1"></div>
+    <div style="padding:8px 12px;border-top:1px solid #2a2a26;font-size:7px;color:#444">
+      PAL Layout · LensCowboy<br>Orbit: LMB · Pan: RMB · Zoom: Scroll
+    </div>
+  `;
+  shell.appendChild(rightPanel);
+
+  container.appendChild(shell);
 
   // Renderer
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -111,7 +156,6 @@ export function init(container, options = {}) {
 
   // Scene
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1a1a18);
 
   // Cameras
   const directorCam = new THREE.PerspectiveCamera(55, w / h, 0.1, 2000);
@@ -154,7 +198,7 @@ export function init(container, options = {}) {
   fill.position.set(-30, 20, -20);
   scene.add(fill);
 
-  // Sky
+  // Sky — generate environment map for background
   const sky = new Sky();
   sky.scale.setScalar(10000);
   scene.add(sky);
@@ -167,6 +211,21 @@ export function init(container, options = {}) {
   const theta = THREE.MathUtils.degToRad(180);
   const sunPos = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
   skyUniforms['sunPosition'].value.copy(sunPos);
+
+  // Generate sky environment map for scene background
+  try {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const skyScene = new THREE.Scene();
+    skyScene.add(sky.clone());
+    const envMap = pmrem.fromScene(skyScene, 0, 0.1, 1000).texture;
+    scene.background = envMap;
+    scene.environment = envMap;
+    pmrem.dispose();
+    skyScene.clear();
+  } catch (e) {
+    console.warn('[PAL] Sky env map failed, using solid background:', e);
+    scene.background = new THREE.Color(0x1a1a18);
+  }
 
   // Viewer state
   _viewer = {
@@ -185,13 +244,37 @@ export function init(container, options = {}) {
   _bindControls(canvas);
 
   // Resize observer
-  new ResizeObserver(() => _resize()).observe(container);
+  new ResizeObserver(() => _resize()).observe(viewportWrap);
+
+  // Populate proxy dropdown
+  const proxySelect = document.getElementById('pal-proxy-select');
+  if (proxySelect) {
+    Object.keys(PROXY_BUILDERS).forEach(type => {
+      const opt = document.createElement('option');
+      opt.value = type;
+      opt.textContent = type.replace(/_/g, ' ');
+      proxySelect.appendChild(opt);
+    });
+  }
+
+  // Add proxy button
+  const addBtn = document.getElementById('pal-add-proxy-btn');
+  if (addBtn) {
+    addBtn.addEventListener('click', () => {
+      const type = proxySelect?.value || 'prop_generic';
+      addProxy(type, [0, 0, 0]);
+      _updateObjectList();
+    });
+  }
 
   // Render loop
+  let _frameCount = 0;
   function animate() {
     if (_destroyed) return;
     requestAnimationFrame(animate);
     renderer.render(scene, _viewer.activeCamera);
+    // Update camera info every 30 frames
+    if (++_frameCount % 30 === 0) _updateCameraInfo();
   }
   animate();
 
@@ -345,10 +428,38 @@ export function addProxy(proxyType, position = [0, 0, 0], colorHint = 'white') {
 
 // ── Internal helpers ─────────────────────────────────────
 
+function _updateObjectList() {
+  const el = document.getElementById('pal-obj-list');
+  const info = document.getElementById('pal-scene-info');
+  if (!_viewer || !el) return;
+  let html = '';
+  _viewer.objects.forEach((mesh, id) => {
+    const label = mesh.userData._label || mesh.userData.proxyType || id;
+    html += `<div style="padding:3px 12px;cursor:pointer;transition:background .1s;color:#aaa;display:flex;align-items:center;gap:4px" onmouseenter="this.style.background='#1a1a18'" onmouseleave="this.style.background='transparent'">
+      <span style="width:6px;height:6px;border-radius:50%;background:#888;flex-shrink:0"></span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label.replace(/_/g, ' ')}</span>
+    </div>`;
+  });
+  el.innerHTML = html || '<div style="padding:8px 12px;color:#444">No objects</div>';
+  if (info) info.textContent = `${_viewer.objects.size} object${_viewer.objects.size !== 1 ? 's' : ''}`;
+}
+
+function _updateCameraInfo() {
+  if (!_viewer) return;
+  const fovEl = document.getElementById('pal-cam-fov');
+  const posEl = document.getElementById('pal-cam-pos');
+  if (fovEl) fovEl.textContent = _viewer.shotCam.fov.toFixed(1) + '°';
+  if (posEl) {
+    const p = _viewer.shotCam.position;
+    posEl.textContent = `${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}`;
+  }
+}
+
 function _resize() {
-  if (!_viewer || !_container) return;
-  const w = _container.clientWidth || 800;
-  const h = _container.clientHeight || 600;
+  if (!_viewer) return;
+  const wrap = _container?.querySelector('div[style*="flex:1"]');
+  const w = wrap?.clientWidth || _container?.clientWidth || 800;
+  const h = wrap?.clientHeight || _container?.clientHeight || 600;
   _viewer.renderer.setSize(w, h, false);
   _viewer.directorCam.aspect = w / h;
   _viewer.directorCam.updateProjectionMatrix();
