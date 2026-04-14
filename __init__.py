@@ -18,5 +18,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PALLayoutNode": "PAL Layout (LensCowboy)"
 }
 
-WEB_DIRECTORY = "./web"
+WEB_DIRECTORY = "./web_comfy"
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
