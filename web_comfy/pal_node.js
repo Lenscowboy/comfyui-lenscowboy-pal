@@ -502,8 +502,6 @@ app.registerExtension({
               Paste your LensCowboy token into lc_api_key to unlock the full viewport
             </div>`);
         }, 2000);
-        };
-        document.head.appendChild(script);
       }
 
       // Render All — request passes from PAL iframe
