@@ -449,10 +449,17 @@ app.registerExtension({
 
       document.body.appendChild(modal);
 
-      // Load full PAL via iframe — complete UI with all panels
       const apiKeyWidget = this.widgets?.find(w => w.name === "lc_api_key");
       const projectWidget = this.widgets?.find(w => w.name === "lc_project_id");
       const palToken = apiKeyWidget?.value || "";
+
+      // Route: API key → iframe (full PAL SaaS), no key → standalone bundle
+      if (!palToken) {
+        this._openStandaloneViewport(container, modal);
+        return;
+      }
+
+      // ── Connected mode: iframe with full PAL UI ──────────────────
       const palProject = projectWidget?.value || "";
       let palUrl = `${LC_API_BASE}/pal?comfy=1`;
       if (palToken) palUrl += `&token=${encodeURIComponent(palToken)}`;
@@ -633,11 +640,76 @@ app.registerExtension({
       }
     };
 
+    // ── Standalone viewport (no API key — free tier) ──────────────
+    nodeType.prototype._openStandaloneViewport = function (container, modal) {
+      const _initViewport = () => {
+        if (window.PALViewport && window.PALViewport.init) {
+          window.PALViewport.init(container, {
+            state: this._palState || {},
+            onStateChange: (state) => { this._palState = state; },
+          });
+        } else {
+          container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:monospace;font-size:12px;color:#555">
+            PAL viewport failed to initialise.
+          </div>`;
+        }
+      };
+
+      if (window.PALViewport) {
+        _initViewport();
+      } else {
+        const bundleSrc = "/extensions/comfyui-lenscowboy-pal/pal_three_bundle.js";
+        const script = document.createElement("script");
+        script.src = bundleSrc;
+        script.onload = () => _initViewport();
+        script.onerror = () => {
+          container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:monospace;font-size:12px;color:#f87171">
+            Failed to load PAL viewport bundle.
+          </div>`;
+        };
+        document.head.appendChild(script);
+      }
+
+      // Wire Render All for standalone mode
+      document.getElementById("pal-comfy-render").onclick = () => {
+        if (window.PALViewport?.renderPasses) {
+          const passes = window.PALViewport.renderPasses();
+          const plan = this._lcSession?.plan || "free";
+          if (!PAID_PLANS.has(plan) && passes.beauty) {
+            passes.beauty = this._lcApplyWatermark(passes.beauty);
+          }
+          this._palState.beauty_b64 = passes.beauty;
+          this._palState.depth_b64 = passes.depth;
+          this._palState.normal_b64 = passes.normals;
+          this._palRendered = true;
+          this._updateSummary();
+        }
+      };
+
+      // Wire Save & Close for standalone mode
+      document.getElementById("pal-comfy-save").onclick = () => {
+        if (window.PALViewport?.getState) {
+          Object.assign(this._palState, window.PALViewport.getState());
+        }
+        this._saveAndClose(modal);
+      };
+
+      // ESC
+      const escHandler = (e) => {
+        if (e.key === "Escape") { this._saveAndClose(modal); document.removeEventListener("keydown", escHandler); }
+      };
+      document.addEventListener("keydown", escHandler);
+    };
+
     nodeType.prototype._saveAndClose = function (modal) {
-      // Request state from iframe before closing
+      // Request state from iframe if present
       const iframe = modal.querySelector("iframe");
       if (iframe?.contentWindow) {
         iframe.contentWindow.postMessage({ type: "pal:get-state" }, "*");
+      }
+      // Or capture from standalone viewport
+      if (window.PALViewport?.getState) {
+        Object.assign(this._palState, window.PALViewport.getState());
       }
 
       // Serialise scene state to hidden widget
@@ -648,6 +720,7 @@ app.registerExtension({
 
       // Cleanup
       if (this._iframeCleanup) { this._iframeCleanup(); this._iframeCleanup = null; }
+      if (window.PALViewport?.destroy) window.PALViewport.destroy();
       modal.remove();
     };
 
