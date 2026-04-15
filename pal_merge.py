@@ -12,6 +12,7 @@ class PALInputResolver:
         breakdown = lc_data.get("breakdown") or {}
         return {
             "assets":          lc_data.get("assets")       or self._parse_glb(comfy_inputs.get("glb_path", "")),
+            "imported_models": comfy_inputs.get("imported_models", []),
             "prompt":          lc_data.get("shot_prompt")  or comfy_inputs.get("prompt", ""),
             "camera":          lc_data.get("camera")       or comfy_inputs.get("camera_preset", "eye_level"),
             "frame_start":     lc_data.get("frame_start")  or comfy_inputs.get("frame_start", 1),

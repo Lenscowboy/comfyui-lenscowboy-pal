@@ -41,6 +41,8 @@ class PALNode:
                 "lc_project_id": ("STRING", {"default": ""}),
                 "lc_shot_id":    ("STRING", {"default": ""}),
                 "glb_path":      ("STRING",  {"default": ""}),
+                "glb_model":     ("STRING",  {"default": ""}),
+                "obj_model":     ("STRING",  {"default": ""}),
                 "prompt":        ("STRING",  {"default": "", "multiline": True}),
                 "camera_preset": ("STRING",  {"default": "eye_level"}),
                 "frame_start":   ("INT",     {"default": 1, "min": 0, "max": 9999}),
@@ -59,7 +61,8 @@ class PALNode:
         return float("nan")
 
     def execute(self, lc_api_key="", lc_project_id="", lc_shot_id="",
-                glb_path="", prompt="", camera_preset="eye_level",
+                glb_path="", glb_model="", obj_model="",
+                prompt="", camera_preset="eye_level",
                 frame_start=1, frame_end=24, render_width=512, render_height=512,
                 scene_json_in="", _pal_scene_state="{}"):
 
@@ -80,19 +83,29 @@ class PALNode:
             except Exception as e:
                 logger.warning(f"[PAL Node] LC connection failed: {e}")
 
+        # Resolve model inputs — accept file paths or base64 data from upstream nodes
+        imported_models = self._resolve_models(glb_path, glb_model, obj_model)
+
         from .pal_merge import PALInputResolver
         resolved = PALInputResolver().resolve(lc_data, {
             "glb_path": glb_path, "prompt": prompt,
             "camera_preset": camera_preset,
             "frame_start": frame_start, "frame_end": frame_end,
             "scene_json_in": scene_json_in,
+            "imported_models": imported_models,
         })
 
         beauty = self._decode_pass(state.get("beauty_b64"), render_width, render_height)
         depth = self._decode_pass(state.get("depth_b64"), render_width, render_height, channels=1)
         normals = self._decode_pass(state.get("normal_b64"), render_width, render_height)
 
-        scene_json = json.dumps(state.get("scene", resolved.get("scene_state", {})))
+        scene_data = state.get("scene", resolved.get("scene_state", {}))
+        if isinstance(scene_data, str):
+            try: scene_data = json.loads(scene_data)
+            except Exception: scene_data = {}
+        if imported_models:
+            scene_data["imported_models"] = imported_models
+        scene_json = json.dumps(scene_data)
         camera_json = json.dumps(state.get("camera", {}))
 
         # Phase 3 — sequence export output
@@ -117,6 +130,47 @@ class PALNode:
             return arr[np.newaxis, ...]
         except Exception:
             return self._blank(width, height, channels)
+
+    def _resolve_models(self, glb_path="", glb_model="", obj_model=""):
+        """Build imported_models list from inputs. Accepts file paths or base64 data."""
+        import os
+        models = []
+
+        # glb_path — legacy file path input
+        if glb_path and glb_path.strip():
+            path = glb_path.strip()
+            if os.path.isfile(path):
+                with open(path, "rb") as f:
+                    models.append({"id": "glb_path", "name": os.path.basename(path),
+                                   "format": "glb", "data": base64.b64encode(f.read()).decode()})
+            else:
+                models.append({"id": "glb_path", "name": os.path.basename(path),
+                               "format": "glb", "path": path})
+
+        # glb_model — from upstream node (base64 or file path)
+        if glb_model and glb_model.strip():
+            val = glb_model.strip()
+            if os.path.isfile(val):
+                with open(val, "rb") as f:
+                    models.append({"id": "glb_input", "name": os.path.basename(val),
+                                   "format": "glb", "data": base64.b64encode(f.read()).decode()})
+            else:
+                # Assume base64 data from upstream node
+                models.append({"id": "glb_input", "name": "model.glb",
+                               "format": "glb", "data": val})
+
+        # obj_model — from upstream node (base64 or file path)
+        if obj_model and obj_model.strip():
+            val = obj_model.strip()
+            if os.path.isfile(val):
+                with open(val, "rb") as f:
+                    models.append({"id": "obj_input", "name": os.path.basename(val),
+                                   "format": "obj", "data": base64.b64encode(f.read()).decode()})
+            else:
+                models.append({"id": "obj_input", "name": "model.obj",
+                               "format": "obj", "data": val})
+
+        return models
 
     def _blank(self, w, h, c=3):
         return np.zeros((1, h, w, c), dtype=np.float32)

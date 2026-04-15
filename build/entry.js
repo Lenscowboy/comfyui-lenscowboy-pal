@@ -391,6 +391,10 @@ export function loadState(state) {
     _viewer.scene.add(mesh);
     _viewer.objects.set(obj.id, mesh);
   }
+  // Load imported models (GLB/OBJ from upstream nodes)
+  if (state.scene?.imported_models) {
+    _loadImportedModels(state.scene.imported_models);
+  }
   // Load camera
   if (state.camera) {
     const c = state.camera;
@@ -399,6 +403,52 @@ export function loadState(state) {
       _viewer.shotCam.rotation.set(THREE.MathUtils.degToRad(c.rotation[0]), THREE.MathUtils.degToRad(c.rotation[1]), THREE.MathUtils.degToRad(c.rotation[2]));
     }
     if (c.fov) { _viewer.shotCam.fov = c.fov; _viewer.shotCam.updateProjectionMatrix(); }
+  }
+}
+
+/**
+ * Load imported 3D models (GLB/OBJ) from upstream ComfyUI nodes.
+ * Models arrive as base64-encoded data or file paths.
+ */
+function _loadImportedModels(models) {
+  if (!_viewer || !models?.length) return;
+  for (const model of models) {
+    try {
+      if (model.format === 'glb' && model.data) {
+        const binary = Uint8Array.from(atob(model.data), c => c.charCodeAt(0));
+        const loader = new GLTFLoader();
+        loader.parse(binary.buffer, '', (gltf) => {
+          const root = gltf.scene;
+          root.userData.palId = model.id;
+          root.userData.proxyType = 'imported_glb';
+          root.userData.imported = true;
+          root.traverse(child => { if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; } });
+          _viewer.scene.add(root);
+          _viewer.objects.set(model.id, root);
+          _updateObjectList();
+          console.log(`[PAL] Loaded GLB model: ${model.name}`);
+        }, (err) => { console.warn('[PAL] GLB parse failed:', err); });
+      } else if (model.format === 'obj' && model.data) {
+        const text = atob(model.data);
+        const loader = new OBJLoader();
+        const root = loader.parse(text);
+        root.userData.palId = model.id;
+        root.userData.proxyType = 'imported_obj';
+        root.userData.imported = true;
+        root.traverse(child => {
+          if (child.isMesh) {
+            child.castShadow = true; child.receiveShadow = true;
+            if (!child.material || child.material.type === 'MeshBasicMaterial') {
+              child.material = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.6, metalness: 0.1 });
+            }
+          }
+        });
+        _viewer.scene.add(root);
+        _viewer.objects.set(model.id, root);
+        _updateObjectList();
+        console.log(`[PAL] Loaded OBJ model: ${model.name}`);
+      }
+    } catch (e) { console.warn(`[PAL] Failed to load model ${model.name}:`, e); }
   }
 }
 
