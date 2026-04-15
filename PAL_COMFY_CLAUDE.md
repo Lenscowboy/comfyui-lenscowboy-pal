@@ -52,8 +52,8 @@ PAL SaaS (iframe target — lives in lenscowboy-pipeline-saas repo)
 | `lc_project_id` | STRING | Platform project to load |
 | `lc_shot_id` | STRING | Specific shot to load |
 | `glb_path` | STRING | Legacy file path to a GLB model |
-| `glb_model` | STRING | GLB data from upstream node (file path or base64) |
-| `obj_model` | STRING | OBJ data from upstream node (file path or base64) |
+| `GLB` | FILE_3D_GLB / FILE_3D / MESH / STRING | 3D model from upstream node (Hunyuan3D, Tencent, Meshy, Rodin, Tripo) |
+| `OBJ` | FILE_3D_OBJ / FILE_3D / MESH / STRING | 3D model from upstream node |
 | `prompt` | STRING | Scene description for proxy generation |
 | `camera_preset` | STRING | Camera height preset (eye_level, low_angle, etc.) |
 | `frame_start` | INT | Animation start frame |
