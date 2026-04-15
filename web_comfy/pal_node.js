@@ -502,10 +502,11 @@ app.registerExtension({
 
       // Send imported models to PAL iframe after it loads
       iframe.addEventListener("load", () => {
+        // Models from graph connections are in _palState after execute()
+        const stateModels = this._palState?.scene?.imported_models || [];
         const glbPath = this.widgets?.find(w => w.name === "glb_path")?.value || "";
-        const models = [];
+        const models = [...stateModels];
         if (glbPath) models.push({ id: "glb_path", name: glbPath.split("/").pop(), format: "glb", path: glbPath });
-        // GLB/OBJ inputs are connectable slots — data flows through execute(), not widgets
         if (models.length && iframe.contentWindow) {
           // Small delay to let PAL init complete
           setTimeout(() => {

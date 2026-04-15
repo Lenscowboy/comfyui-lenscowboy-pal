@@ -91,7 +91,11 @@ class PALNode:
             render_height = min(render_height, 512)
 
         # Resolve model inputs — accept file paths or base64 data from upstream nodes
-        imported_models = self._resolve_models(glb_path, GLB, OBJ)
+        try:
+            imported_models = self._resolve_models(glb_path, GLB, OBJ)
+        except Exception as e:
+            logger.warning(f"[PAL Node] Model resolve failed: {e}")
+            imported_models = []
 
         from .pal_merge import PALInputResolver
         resolved = PALInputResolver().resolve(lc_data, {
@@ -114,6 +118,10 @@ class PALNode:
             except Exception: scene_data = {}
         if imported_models:
             scene_data["imported_models"] = imported_models
+            # Also inject into state so JS widget picks them up on next viewport open
+            if "scene" not in state:
+                state["scene"] = {}
+            state["scene"]["imported_models"] = imported_models
         scene_json = json.dumps(scene_data)
         camera_json = json.dumps(state.get("camera", {}))
 
