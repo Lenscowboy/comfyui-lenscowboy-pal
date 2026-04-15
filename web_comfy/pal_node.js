@@ -502,13 +502,10 @@ app.registerExtension({
 
       // Send imported models to PAL iframe after it loads
       iframe.addEventListener("load", () => {
-        const glbModel = this.widgets?.find(w => w.name === "glb_model")?.value || "";
-        const objModel = this.widgets?.find(w => w.name === "obj_model")?.value || "";
         const glbPath = this.widgets?.find(w => w.name === "glb_path")?.value || "";
         const models = [];
         if (glbPath) models.push({ id: "glb_path", name: glbPath.split("/").pop(), format: "glb", path: glbPath });
-        if (glbModel) models.push({ id: "glb_input", name: "model.glb", format: "glb", data: glbModel });
-        if (objModel) models.push({ id: "obj_input", name: "model.obj", format: "obj", data: objModel });
+        // GLB/OBJ inputs are connectable slots — data flows through execute(), not widgets
         if (models.length && iframe.contentWindow) {
           // Small delay to let PAL init complete
           setTimeout(() => {

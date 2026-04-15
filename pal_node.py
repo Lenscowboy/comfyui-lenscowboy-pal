@@ -41,8 +41,8 @@ class PALNode:
                 "lc_project_id": ("STRING", {"default": ""}),
                 "lc_shot_id":    ("STRING", {"default": ""}),
                 "glb_path":      ("STRING",  {"default": ""}),
-                "glb_model":     ("STRING",  {"default": ""}),
-                "obj_model":     ("STRING",  {"default": ""}),
+                "GLB":           ("*",),
+                "OBJ":           ("*",),
                 "prompt":        ("STRING",  {"default": "", "multiline": True}),
                 "camera_preset": ("STRING",  {"default": "eye_level"}),
                 "frame_start":   ("INT",     {"default": 1, "min": 0, "max": 9999}),
@@ -61,7 +61,7 @@ class PALNode:
         return float("nan")
 
     def execute(self, lc_api_key="", lc_project_id="", lc_shot_id="",
-                glb_path="", glb_model="", obj_model="",
+                glb_path="", GLB=None, OBJ=None,
                 prompt="", camera_preset="eye_level",
                 frame_start=1, frame_end=24, render_width=512, render_height=512,
                 scene_json_in="", _pal_scene_state="{}"):
@@ -91,7 +91,7 @@ class PALNode:
             render_height = min(render_height, 512)
 
         # Resolve model inputs — accept file paths or base64 data from upstream nodes
-        imported_models = self._resolve_models(glb_path, glb_model, obj_model)
+        imported_models = self._resolve_models(glb_path, GLB, OBJ)
 
         from .pal_merge import PALInputResolver
         resolved = PALInputResolver().resolve(lc_data, {
@@ -140,13 +140,13 @@ class PALNode:
         except Exception:
             return self._blank(width, height, channels)
 
-    def _resolve_models(self, glb_path="", glb_model="", obj_model=""):
-        """Build imported_models list from inputs. Accepts file paths or base64 data."""
+    def _resolve_models(self, glb_path="", glb_input=None, obj_input=None):
+        """Build imported_models list from inputs. Accepts file paths, base64 strings, or bytes."""
         import os
         models = []
 
         # glb_path — legacy file path input
-        if glb_path and glb_path.strip():
+        if glb_path and isinstance(glb_path, str) and glb_path.strip():
             path = glb_path.strip()
             if os.path.isfile(path):
                 with open(path, "rb") as f:
@@ -156,30 +156,40 @@ class PALNode:
                 models.append({"id": "glb_path", "name": os.path.basename(path),
                                "format": "glb", "path": path})
 
-        # glb_model — from upstream node (base64 or file path)
-        if glb_model and glb_model.strip():
-            val = glb_model.strip()
+        # GLB — from upstream node (file path, base64 string, or bytes)
+        if glb_input is not None:
+            models.append(self._coerce_model(glb_input, "glb_input", "glb"))
+
+        # OBJ — from upstream node (file path, base64 string, or bytes)
+        if obj_input is not None:
+            models.append(self._coerce_model(obj_input, "obj_input", "obj"))
+
+        return [m for m in models if m]
+
+    def _coerce_model(self, value, model_id, fmt):
+        """Convert any upstream node output to a model dict with base64 data."""
+        import os
+        if isinstance(value, bytes):
+            return {"id": model_id, "name": f"model.{fmt}", "format": fmt,
+                    "data": base64.b64encode(value).decode()}
+        if isinstance(value, str):
+            val = value.strip()
+            if not val:
+                return None
             if os.path.isfile(val):
                 with open(val, "rb") as f:
-                    models.append({"id": "glb_input", "name": os.path.basename(val),
-                                   "format": "glb", "data": base64.b64encode(f.read()).decode()})
-            else:
-                # Assume base64 data from upstream node
-                models.append({"id": "glb_input", "name": "model.glb",
-                               "format": "glb", "data": val})
-
-        # obj_model — from upstream node (base64 or file path)
-        if obj_model and obj_model.strip():
-            val = obj_model.strip()
-            if os.path.isfile(val):
-                with open(val, "rb") as f:
-                    models.append({"id": "obj_input", "name": os.path.basename(val),
-                                   "format": "obj", "data": base64.b64encode(f.read()).decode()})
-            else:
-                models.append({"id": "obj_input", "name": "model.obj",
-                               "format": "obj", "data": val})
-
-        return models
+                    return {"id": model_id, "name": os.path.basename(val), "format": fmt,
+                            "data": base64.b64encode(f.read()).decode()}
+            # Assume base64
+            return {"id": model_id, "name": f"model.{fmt}", "format": fmt, "data": val}
+        # Unknown type — try to convert
+        try:
+            raw = bytes(value)
+            return {"id": model_id, "name": f"model.{fmt}", "format": fmt,
+                    "data": base64.b64encode(raw).decode()}
+        except Exception:
+            logger.warning(f"[PAL Node] Could not coerce {type(value).__name__} to model data")
+            return None
 
     def _blank(self, w, h, c=3):
         return np.zeros((1, h, w, c), dtype=np.float32)
