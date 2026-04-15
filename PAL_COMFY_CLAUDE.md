@@ -199,7 +199,11 @@ if (widget) widget.value = stateJson;
 - `WEB_DIRECTORY = "./web_comfy"` — ComfyUI serves this as `/extensions/comfyui-lenscowboy-pal/`
 - The iframe src must include `comfy=1` param so PAL knows it's in iframe mode
 - Token auth via `?token=` URL param — iframe can't set headers or cookies cross-origin
-- `glb_model`/`obj_model` inputs accept STRING not MESH — ComfyUI has no standard 3D type
+- GLB/OBJ inputs accept `FILE_3D_GLB`, `FILE_3D_OBJ`, `FILE_3D`, `MESH`, `STRING` — matches Hunyuan3D, Tencent, Meshy, Rodin, Tripo, Load3D nodes
+- No standalone bundle — iframe only. Deleted all bundle code April 2026.
+- Free tier gets anonymous 24h JWT auto-injected via `comfy=1` param
+- `/pal/static/*` has no auth gate — client-side JS/CSS, not data
+- Camera ID is `CAM` everywhere — never use `__camera__` (Firestore reserved field)
 - Python changes require ComfyUI restart; JS changes require hard browser refresh (Cmd+Shift+R)
 - The symlink from `ComfyUI/custom_nodes/comfyui-lenscowboy-pal` → this repo means edits here are live
 
