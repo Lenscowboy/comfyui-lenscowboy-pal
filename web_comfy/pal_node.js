@@ -456,6 +456,8 @@ app.registerExtension({
       const palToken = apiKeyWidget?.value || "";
 
       // ── Iframe mode: full PAL SaaS UI ──────────────────
+      // comfy=1 ensures viewport loads even without auth (free tier)
+      // token= passes API key for authenticated features
       const palProject = projectWidget?.value || "";
       let palUrl = `${LC_API_BASE}/pal?comfy=1`;
       if (palToken) palUrl += `&token=${encodeURIComponent(palToken)}`;
