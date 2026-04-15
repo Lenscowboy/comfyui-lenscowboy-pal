@@ -4,7 +4,7 @@
  * Responsibilities:
  * - Register the PAL node widget with ComfyUI's extension system
  * - Add "Open Viewport" button and scene summary display
- * - Launch the full-screen viewport modal (loads Three.js from pal_three_bundle.js)
+ * - Launch full-screen viewport modal (iframe → full PAL SaaS UI)
  * - Bridge viewport scene state ↔ node hidden widget (_pal_scene_state)
  * - Block Queue Prompt via beforeQueuePrompt if passes not yet rendered
  * - Phase 2: connection badge, project/shot selector, watermark, enriched summary
@@ -311,15 +311,17 @@ app.registerExtension({
               shotDescBar.style.padding = "0 16px";
             }
 
-            // If shot has scene_state, load it into viewport
-            if (bd.scene_state && window.PALViewport && window.PALViewport.loadState) {
-              window.PALViewport.loadState(bd.scene_state);
+            // If shot has scene_state, load it into viewport via iframe
+            if (bd.scene_state) {
+              const iframe = container?.querySelector("iframe") || document.querySelector("#pal-comfy-modal iframe");
+              if (iframe?.contentWindow) iframe.contentWindow.postMessage({ type: "pal:load-state", state: bd.scene_state }, "*");
               nodeRef._palState = { ...nodeRef._palState, scene: bd.scene_state };
             }
 
-            // If shot has camera data, update viewport camera
-            if (bd.camera && window.PALViewport && window.PALViewport.setCamera) {
-              window.PALViewport.setCamera(bd.camera);
+            // If shot has camera data, update viewport camera via iframe
+            if (bd.camera) {
+              const iframe = container?.querySelector("iframe") || document.querySelector("#pal-comfy-modal iframe");
+              if (iframe?.contentWindow) iframe.contentWindow.postMessage({ type: "pal:set-camera", camera: bd.camera }, "*");
               nodeRef._palState = { ...nodeRef._palState, camera: bd.camera };
             }
 
@@ -453,13 +455,7 @@ app.registerExtension({
       const projectWidget = this.widgets?.find(w => w.name === "lc_project_id");
       const palToken = apiKeyWidget?.value || "";
 
-      // Route: API key → iframe (full PAL SaaS), no key → standalone bundle
-      if (!palToken) {
-        this._openStandaloneViewport(container, modal);
-        return;
-      }
-
-      // ── Connected mode: iframe with full PAL UI ──────────────────
+      // ── Iframe mode: full PAL SaaS UI ──────────────────
       const palProject = projectWidget?.value || "";
       let palUrl = `${LC_API_BASE}/pal?comfy=1`;
       if (palToken) palUrl += `&token=${encodeURIComponent(palToken)}`;
@@ -510,16 +506,6 @@ app.registerExtension({
           }, 1500);
         }
       });
-
-      // Fallback: if no token and iframe shows landing, show message
-      if (!palToken) {
-        setTimeout(() => {
-          container.insertAdjacentHTML("beforeend",
-            `<div style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.8);border:1px solid #2a2a26;border-radius:6px;padding:8px 16px;font-family:monospace;font-size:10px;color:#f5c400;pointer-events:none;z-index:1">
-              Paste your LensCowboy token into lc_api_key to unlock the full viewport
-            </div>`);
-        }, 2000);
-      }
 
       // Render All — request passes from PAL iframe
       document.getElementById("pal-comfy-render").onclick = () => {
@@ -576,20 +562,31 @@ app.registerExtension({
             const shot = shots[i];
             progress.textContent = `Exporting ${i + 1} / ${total}: ${shot.name || shot.id}`;
 
-            // Load shot scene state
+            // Load shot scene state via iframe
             const bd = await this._lcFetchBreakdown(this._lcSelectedProject, shot.id);
-            if (bd?.scene_state && window.PALViewport?.loadState) {
-              window.PALViewport.loadState(bd.scene_state);
+            const iframe = container.closest("#pal-comfy-modal")?.querySelector("iframe");
+            if (bd?.scene_state && iframe?.contentWindow) {
+              iframe.contentWindow.postMessage({ type: "pal:load-state", state: bd.scene_state }, "*");
             }
-            if (bd?.camera && window.PALViewport?.setCamera) {
-              window.PALViewport.setCamera(bd.camera);
+            if (bd?.camera && iframe?.contentWindow) {
+              iframe.contentWindow.postMessage({ type: "pal:set-camera", camera: bd.camera }, "*");
             }
 
-            // Render passes for this shot
+            // Request render passes from iframe
             let passes = { beauty: null, depth: null, normals: null };
-            if (window.PALViewport?.renderPasses) {
-              passes = window.PALViewport.renderPasses();
-              // Watermark free tier
+            if (iframe?.contentWindow) {
+              iframe.contentWindow.postMessage({ type: "pal:render-request" }, "*");
+              // Wait for render response
+              passes = await new Promise(resolve => {
+                const handler = (e) => {
+                  if (e.source === iframe.contentWindow && e.data?.type === "pal:render") {
+                    window.removeEventListener("message", handler);
+                    resolve({ beauty: e.data.beauty, depth: e.data.depth, normals: e.data.normals });
+                  }
+                };
+                window.addEventListener("message", handler);
+                setTimeout(() => { window.removeEventListener("message", handler); resolve({ beauty: null, depth: null, normals: null }); }, 5000);
+              });
               const plan = this._lcSession?.plan || "free";
               if (!PAID_PLANS.has(plan) && passes.beauty) {
                 passes.beauty = this._lcApplyWatermark(passes.beauty);
@@ -655,76 +652,11 @@ app.registerExtension({
       }
     };
 
-    // ── Standalone viewport (no API key — free tier) ──────────────
-    nodeType.prototype._openStandaloneViewport = function (container, modal) {
-      const _initViewport = () => {
-        if (window.PALViewport && window.PALViewport.init) {
-          window.PALViewport.init(container, {
-            state: this._palState || {},
-            onStateChange: (state) => { this._palState = state; },
-          });
-        } else {
-          container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:monospace;font-size:12px;color:#555">
-            PAL viewport failed to initialise.
-          </div>`;
-        }
-      };
-
-      if (window.PALViewport) {
-        _initViewport();
-      } else {
-        const bundleSrc = "/extensions/comfyui-lenscowboy-pal/pal_three_bundle.js";
-        const script = document.createElement("script");
-        script.src = bundleSrc;
-        script.onload = () => _initViewport();
-        script.onerror = () => {
-          container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:monospace;font-size:12px;color:#f87171">
-            Failed to load PAL viewport bundle.
-          </div>`;
-        };
-        document.head.appendChild(script);
-      }
-
-      // Wire Render All for standalone mode
-      document.getElementById("pal-comfy-render").onclick = () => {
-        if (window.PALViewport?.renderPasses) {
-          const passes = window.PALViewport.renderPasses();
-          const plan = this._lcSession?.plan || "free";
-          if (!PAID_PLANS.has(plan) && passes.beauty) {
-            passes.beauty = this._lcApplyWatermark(passes.beauty);
-          }
-          this._palState.beauty_b64 = passes.beauty;
-          this._palState.depth_b64 = passes.depth;
-          this._palState.normal_b64 = passes.normals;
-          this._palRendered = true;
-          this._updateSummary();
-        }
-      };
-
-      // Wire Save & Close for standalone mode
-      document.getElementById("pal-comfy-save").onclick = () => {
-        if (window.PALViewport?.getState) {
-          Object.assign(this._palState, window.PALViewport.getState());
-        }
-        this._saveAndClose(modal);
-      };
-
-      // ESC
-      const escHandler = (e) => {
-        if (e.key === "Escape") { this._saveAndClose(modal); document.removeEventListener("keydown", escHandler); }
-      };
-      document.addEventListener("keydown", escHandler);
-    };
-
     nodeType.prototype._saveAndClose = function (modal) {
-      // Request state from iframe if present
+      // Request state from iframe
       const iframe = modal.querySelector("iframe");
       if (iframe?.contentWindow) {
         iframe.contentWindow.postMessage({ type: "pal:get-state" }, "*");
-      }
-      // Or capture from standalone viewport
-      if (window.PALViewport?.getState) {
-        Object.assign(this._palState, window.PALViewport.getState());
       }
 
       // Serialise scene state to hidden widget
@@ -735,7 +667,6 @@ app.registerExtension({
 
       // Cleanup
       if (this._iframeCleanup) { this._iframeCleanup(); this._iframeCleanup = null; }
-      if (window.PALViewport?.destroy) window.PALViewport.destroy();
       modal.remove();
     };
 

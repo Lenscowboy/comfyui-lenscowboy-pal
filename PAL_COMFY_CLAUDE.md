@@ -2,13 +2,9 @@
 
 ## Overview
 
-Custom ComfyUI node that embeds a full Three.js 3D previsualisation viewport inside ComfyUI. Used for spatial layout, camera setup, and multipass render output (beauty, depth, normals). Part of the LensCowboy AI content pipeline.
+Custom ComfyUI node that embeds the full PAL SaaS 3D previsualisation viewport inside ComfyUI via iframe. Used for spatial layout, camera setup, and multipass render output (beauty, depth, normals). Part of the LensCowboy AI content pipeline.
 
-**Two operating modes:**
-- **Standalone** (no API key): offline Three.js viewport via `pal_three_bundle.js` — free tier
-- **Connected** (with API key): full PAL SaaS UI loaded in iframe via postMessage bridge — paid tiers
-
-The connected iframe mode is the primary path. The standalone bundle is a fallback.
+**Architecture: iframe only.** The node opens a full-screen modal containing an iframe to the PAL SaaS UI. All communication via postMessage. No standalone bundle.
 
 ## Architecture
 
@@ -23,15 +19,14 @@ ComfyUI Graph
 ComfyUI Browser
   pal_node.js (extension)
     ├─ Registers PALLayoutNode widget
-    ├─ "Open Viewport" button → full-screen modal
-    ├─ Connected mode: <iframe src="/pal?comfy=1&token=...">
-    │   └─ postMessage bridge: pal:render-request, pal:get-state, pal:load-models
-    ├─ Standalone mode: loads pal_three_bundle.js into modal div
+    ├─ "Open Viewport" button → full-screen modal with iframe
+    ├─ <iframe src="/pal?comfy=1&token=...&project=...&client_id=...">
+    ├─ postMessage bridge: pal:render-request, pal:get-state, pal:load-models
     ├─ Bridge: viewport state ↔ _pal_scene_state hidden widget
     └─ beforeQueuePrompt: blocks if passes not rendered
 
-PAL SaaS (iframe target)
-  /pal?comfy=1&token=...&project=...&client_id=...
+PAL SaaS (iframe target — lives in lenscowboy-pipeline-saas repo)
+  /pal?comfy=1&token=...
     ├─ Full viewport with all PAL features
     ├─ Listens for postMessage from ComfyUI parent
     └─ Sends pal:state and pal:render messages back
@@ -46,9 +41,6 @@ PAL SaaS (iframe target)
 | `pal_merge.py` | Input resolver: LC platform data vs ComfyUI graph inputs |
 | `pal_api.py` | API client: session auth, project load, scene save, pipeline write-back |
 | `web_comfy/pal_node.js` | Frontend extension: widget, viewport modal, postMessage bridge |
-| `build/entry.js` | Standalone Three.js viewport (fallback, not used in connected mode) |
-| `web/` | Copied PAL viewport modules for standalone bundle |
-| `build.sh` | Bundles standalone viewport via esbuild |
 
 ## Node Inputs & Outputs
 
@@ -56,7 +48,7 @@ PAL SaaS (iframe target)
 
 | Input | Type | Purpose |
 |-------|------|---------|
-| `lc_api_key` | STRING | LensCowboy platform token — enables connected mode |
+| `lc_api_key` | STRING | LensCowboy platform token — authenticates with PAL SaaS |
 | `lc_project_id` | STRING | Platform project to load |
 | `lc_shot_id` | STRING | Specific shot to load |
 | `glb_path` | STRING | Legacy file path to a GLB model |
@@ -99,9 +91,9 @@ PAL SaaS (iframe target)
 6. Decodes base64 render passes from state to numpy IMAGE arrays
 7. Returns 8 outputs
 
-## postMessage Bridge (Connected Mode)
+## postMessage Bridge
 
-PAL SaaS runs in an iframe. Communication is via `window.postMessage`:
+PAL SaaS runs in an iframe. All communication via `window.postMessage`:
 
 ### ComfyUI → PAL iframe
 
@@ -110,6 +102,8 @@ PAL SaaS runs in an iframe. Communication is via `window.postMessage`:
 | `pal:render-request` | — | User clicks "Render All" button |
 | `pal:get-state` | — | User clicks "Save & Close" |
 | `pal:load-models` | `{ models: [{id, name, format, data/path}] }` | After iframe loads, if model inputs connected |
+| `pal:load-state` | `{ state }` | Shot switcher loads breakdown scene data |
+| `pal:set-camera` | `{ camera }` | Shot switcher loads breakdown camera data |
 
 ### PAL iframe → ComfyUI
 
@@ -124,8 +118,7 @@ Accepts 3D models from upstream nodes (e.g. Hunyuan3D, TripoSR):
 
 - **File path**: if the string is a valid file path, reads and base64-encodes the file
 - **Base64 data**: if not a file path, treated as base64-encoded model data
-- **Connected mode**: sends via `pal:load-models` postMessage → PAL uses `GLTFLoader.parse()` or `OBJLoader.parse()`
-- **Standalone mode**: loaded directly in `entry.js` via `_loadImportedModels()`
+- Sends via `pal:load-models` postMessage → PAL uses `GLTFLoader.parse()` or `OBJLoader.parse()`
 
 ## Input Priority (pal_merge.py)
 
@@ -152,16 +145,7 @@ LC frame_end        →  frame_end       →  24
 
 Watermark: `_lcApplyWatermark()` draws subtle "lenscowboy.com" text on beauty pass for free tier.
 
-## Building the Standalone Bundle
-
-```bash
-./build.sh
-# Runs: npx esbuild build/entry.js --bundle --format=esm --outfile=web_comfy/pal_three_bundle.js
-```
-
-The bundle includes Three.js r171, GLTFLoader, OBJLoader, FBXLoader, Sky, OrbitControls, and 34 proxy builder types.
-
-**Note:** The standalone bundle is a fallback only. Connected mode (iframe) is the primary path and uses the full PAL SaaS codebase — no bundle needed.
+Feature gates checked from `/pal/comfy/features` endpoint response. Buttons (Send to Pipeline, Export Sequence) only shown when plan includes the feature.
 
 ## Important Patterns
 
@@ -174,7 +158,7 @@ def IS_CHANGED(cls, **kwargs):
 Forces ComfyUI to always re-execute the node (viewport state changes aren't detectable from inputs alone).
 
 ### beforeQueuePrompt blocks unrendered state
-The JS extension blocks queue if the viewport has been opened but passes haven't been rendered yet. This prevents sending empty images downstream.
+The JS extension blocks queue if the viewport has been opened but passes haven't been rendered yet.
 
 ### Hidden widget round-trip
 Scene state lives in `_pal_scene_state` (JSON string). The JS widget updates this before queue via:
@@ -193,22 +177,22 @@ if (widget) widget.value = stateJson;
 - The iframe src must include `comfy=1` param so PAL knows it's in iframe mode
 - Token auth via `?token=` URL param — iframe can't set headers or cookies cross-origin
 - `glb_model`/`obj_model` inputs accept STRING not MESH — ComfyUI has no standard 3D type
-- The standalone bundle (`pal_three_bundle.js`) is ~694KB — only loaded if no API key is set
+- Python changes require ComfyUI restart; JS changes require hard browser refresh (Cmd+Shift+R)
+- The symlink from `ComfyUI/custom_nodes/comfyui-lenscowboy-pal` → this repo means edits here are live
 
 ## Testing
 
 1. Place node in ComfyUI graph
-2. Without API key: click "Open Viewport" → standalone bundle loads
-3. With API key: paste token → connection badge turns green → "Open Viewport" loads iframe
-4. Connect Hunyuan3D output to `glb_model` input → model appears in viewport
-5. Render passes → queue prompt → beauty/depth/normal flow downstream
+2. Paste API key → connection badge turns green → "Open Viewport" loads iframe
+3. Connect Hunyuan3D output to `glb_model` input → model appears in viewport
+4. Render passes → queue prompt → beauty/depth/normal flow downstream
 
 ## Deployment
 
-Install as custom node:
+Install as custom node (symlink for development):
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/Lenscowboy/comfyui-lenscowboy-pal.git
+ln -s /path/to/comfyui-lenscowboy-pal .
 pip install -r comfyui-lenscowboy-pal/requirements.txt
 # Restart ComfyUI
 ```
