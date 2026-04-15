@@ -136,16 +136,39 @@ LC frame_end        →  frame_end       →  24
 
 ## Plan Tiers & Feature Gates
 
-| Plan | Features |
-|------|----------|
-| free | Viewport only, watermarked beauty pass |
-| node_creator | + multipass, cloud save, no watermark |
-| influencer | + project load, asset library, pipeline write-back |
-| enterprise | + breakdown integration, sequence export |
+ComfyUI users are 3D artists, not LCBE/Pipeline users. No Firestore save,
+no project load, no pipeline write-back. Scene state persists locally in the
+`_pal_scene_state` hidden widget (saved with the ComfyUI workflow file).
 
-Watermark: `_lcApplyWatermark()` draws subtle "lenscowboy.com" text on beauty pass for free tier.
+### Feature Gate Matrix
 
-Feature gates checked from `/pal/comfy/features` endpoint response. Buttons (Send to Pipeline, Export Sequence) only shown when plan includes the feature.
+| Feature | Free | Creator+ | Enterprise |
+|---------|------|----------|------------|
+| Viewport + proxies | Yes | Yes | Yes |
+| GLB/OBJ import | Yes | Yes | Yes |
+| Camera + animation (local to node) | Yes | Yes | Yes |
+| Beauty render ≤512 | Clean | Clean | Clean |
+| Beauty render >512 | Blocked | Clean | Clean |
+| Depth/Normal/Alpha passes | Blocked | Yes | Yes |
+| Sequence export | No | No | Yes |
+| Breakdown integration | No | No | Yes |
+
+### Gate behaviour
+- **No watermark** on any tier — 512 cap is the free tier limit
+- Locked features: button visible but dimmed with lock icon
+- Click locked feature → toast: "{Feature} requires {Plan} plan" with pricing link
+- Never blocks the viewport or basic workflow
+- Plan resolved from API key JWT (`plan` claim). No key = free tier.
+
+### Server-side plan → features mapping (`pal_comfy.py`)
+```python
+"free":        ["viewport", "beauty_512"]
+"creator":     ["viewport", "beauty_512", "beauty_hires", "multipass"]
+"influencer":  ["viewport", "beauty_512", "beauty_hires", "multipass"]
+"pro":         ["viewport", "beauty_512", "beauty_hires", "multipass"]
+"studio":      ["viewport", "beauty_512", "beauty_hires", "multipass"]
+"enterprise":  ["viewport", "beauty_512", "beauty_hires", "multipass", "sequence_export", "breakdown"]
+```
 
 ## Important Patterns
 

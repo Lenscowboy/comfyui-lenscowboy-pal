@@ -74,14 +74,21 @@ class PALNode:
         except json.JSONDecodeError:
             state = {}
 
-        # Merge inputs
+        # Merge inputs + resolve plan
         lc_data = {}
+        plan = "free"
         if lc_api_key:
             try:
                 from .pal_api import fetch_project_data
                 lc_data = fetch_project_data(lc_api_key, lc_project_id, lc_shot_id)
+                plan = lc_data.get("plan", "free")
             except Exception as e:
                 logger.warning(f"[PAL Node] LC connection failed: {e}")
+
+        # Gate: resolution capped to 512 for free tier
+        if plan == "free":
+            render_width = min(render_width, 512)
+            render_height = min(render_height, 512)
 
         # Resolve model inputs — accept file paths or base64 data from upstream nodes
         imported_models = self._resolve_models(glb_path, glb_model, obj_model)
@@ -96,8 +103,10 @@ class PALNode:
         })
 
         beauty = self._decode_pass(state.get("beauty_b64"), render_width, render_height)
-        depth = self._decode_pass(state.get("depth_b64"), render_width, render_height, channels=1)
-        normals = self._decode_pass(state.get("normal_b64"), render_width, render_height)
+        # Gate: depth/normal passes require paid plan (multipass feature)
+        has_multipass = plan != "free"
+        depth = self._decode_pass(state.get("depth_b64"), render_width, render_height, channels=1) if has_multipass else self._blank(render_width, render_height, 1)
+        normals = self._decode_pass(state.get("normal_b64"), render_width, render_height) if has_multipass else self._blank(render_width, render_height)
 
         scene_data = state.get("scene", resolved.get("scene_state", {}))
         if isinstance(scene_data, str):

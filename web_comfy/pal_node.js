@@ -7,7 +7,7 @@
  * - Launch full-screen viewport modal (iframe → full PAL SaaS UI)
  * - Bridge viewport scene state ↔ node hidden widget (_pal_scene_state)
  * - Block Queue Prompt via beforeQueuePrompt if passes not yet rendered
- * - Phase 2: connection badge, project/shot selector, watermark, enriched summary
+ * - Phase 2: connection badge, project/shot selector, feature gates, enriched summary
  * - Phase 3: breakdown sidebar, pipeline write-back, sequence export, shot switcher
  */
 
@@ -23,8 +23,8 @@ const BADGE = {
   partial:      { label: "[ LC \u2191 ]",  color: "#f5a623" },
 };
 
-/* ── Paid plan names that skip the watermark ─────────────────────── */
-const PAID_PLANS = new Set(["node_creator", "creator", "influencer", "pro", "studio", "enterprise"]);
+/* ── Feature helpers ─────────────────────────────────────────────── */
+const FREE_FEATURES = new Set(["viewport", "beauty_512"]);
 
 app.registerExtension({
   name: EXT_NAME,
@@ -482,11 +482,19 @@ app.registerExtension({
         if (!msg || !msg.type) return;
         if (msg.type === "pal:state") this._palState = msg.state || {};
         if (msg.type === "pal:render") {
+          const features = new Set(this._lcSession?.features || [...FREE_FEATURES]);
           this._palState.beauty_b64 = msg.beauty;
-          this._palState.depth_b64 = msg.depth;
-          this._palState.normal_b64 = msg.normals;
+          // Gate: depth/normal/alpha require multipass feature
+          this._palState.depth_b64 = features.has("multipass") ? msg.depth : "";
+          this._palState.normal_b64 = features.has("multipass") ? msg.normals : "";
           this._palRendered = true;
           this._updateSummary();
+          if (!features.has("multipass") && (msg.depth || msg.normals)) {
+            this._lcShowToast(
+              document.getElementById("pal-comfy-viewport"),
+              "Depth/Normal passes require Creator plan \u2014 lenscowboy.com/pricing", true
+            );
+          }
         }
       };
       window.addEventListener("message", _iframeHandler);
@@ -589,9 +597,11 @@ app.registerExtension({
                 window.addEventListener("message", handler);
                 setTimeout(() => { window.removeEventListener("message", handler); resolve({ beauty: null, depth: null, normals: null }); }, 5000);
               });
-              const plan = this._lcSession?.plan || "free";
-              if (!PAID_PLANS.has(plan) && passes.beauty) {
-                passes.beauty = this._lcApplyWatermark(passes.beauty);
+              // Gate: blank out depth/normal for free tier
+              const features = new Set(this._lcSession?.features || [...FREE_FEATURES]);
+              if (!features.has("multipass")) {
+                passes.depth = null;
+                passes.normals = null;
               }
             }
 
@@ -626,32 +636,6 @@ app.registerExtension({
         if (e.key === "Escape") { this._saveAndClose(modal); document.removeEventListener("keydown", escHandler); }
       };
       document.addEventListener("keydown", escHandler);
-    };
-
-    /* ── Phase 2: watermark helper ──────────────────────────────── */
-    nodeType.prototype._lcApplyWatermark = function (beautyB64) {
-      try {
-        const img = new Image();
-        const canvas = document.createElement("canvas");
-        // Synchronous path: decode base64 → draw → re-encode
-        img.src = beautyB64.startsWith("data:") ? beautyB64 : `data:image/png;base64,${beautyB64}`;
-        // We need the image loaded; for data-URIs this is synchronous in most browsers
-        canvas.width = img.naturalWidth || img.width || 1024;
-        canvas.height = img.naturalHeight || img.height || 1024;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0);
-        // Subtle semi-transparent text in the bottom-right
-        ctx.save();
-        ctx.font = "12px monospace";
-        ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
-        ctx.textAlign = "right";
-        ctx.textBaseline = "bottom";
-        ctx.fillText("lenscowboy.com", canvas.width - 10, canvas.height - 8);
-        ctx.restore();
-        return canvas.toDataURL("image/png");
-      } catch (_) {
-        return beautyB64; // fail silently — don't break the render
-      }
     };
 
     nodeType.prototype._saveAndClose = function (modal) {
