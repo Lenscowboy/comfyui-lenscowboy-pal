@@ -658,6 +658,7 @@ app.registerExtension({
 
         const savedScene = this._palState?.scene;
         const savedCamera = this._palState?.camera;
+        const savedSettings = this._palState?.settings;
 
         if (iframe.contentWindow) {
           // Small delay to let PAL init complete before posting state.
@@ -665,8 +666,16 @@ app.registerExtension({
             if (models.length) {
               iframe.contentWindow.postMessage({ type: "pal:load-models", models }, "*");
             }
-            if (savedScene && (savedScene.objects?.length || savedScene.keyframes)) {
-              iframe.contentWindow.postMessage({ type: "pal:load-state", state: { scene: savedScene } }, "*");
+            // IMPORTANT: do NOT send scene.objects back to the iframe.
+            // Models come via pal:load-models (fresh from source) every open;
+            // re-serialising them as "imported_asset" proxies causes
+            // viewer.loadScene to race the async FBX loader and drop a
+            // prop_generic placeholder (tetrahedron) on top of the real mesh.
+            // Only keyframes and settings ride along here.
+            const loadStatePayload = { scene: {}, settings: savedSettings };
+            if (savedScene?.keyframes) loadStatePayload.scene.keyframes = savedScene.keyframes;
+            if (loadStatePayload.scene.keyframes || savedSettings) {
+              iframe.contentWindow.postMessage({ type: "pal:load-state", state: loadStatePayload }, "*");
             }
             if (savedCamera && (savedCamera.position || savedCamera.quaternion)) {
               iframe.contentWindow.postMessage({ type: "pal:set-camera", camera: savedCamera }, "*");
