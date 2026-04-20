@@ -23,12 +23,13 @@ MAX_BASE64_BYTES = 15_000_000
 
 class PALNode:
     CATEGORY = "LensCowboy/Layout"
-    RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", "STRING", "STRING", "INT", "INT", "STRING")
+    RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", "STRING", "STRING", "INT", "INT", "STRING", "IMAGE", "IMAGE")
     RETURN_NAMES = (
         "beauty_pass", "depth_pass", "normal_pass",
         "scene_json", "camera_json",
         "frame_start", "frame_end",
         "sequence_json",
+        "alpha_pass", "id_matte_pass",
     )
     FUNCTION = "execute"
 
@@ -51,6 +52,7 @@ class PALNode:
                 "render_width":  ("INT",     {"default": 512, "min": 64, "max": 1024, "step": 64}),
                 "render_height": ("INT",     {"default": 512, "min": 64, "max": 1024, "step": 64}),
                 "scene_json_in": ("STRING",  {"default": ""}),
+                "use_local_renderer": ("BOOLEAN", {"default": False}),
             },
             "hidden": {
                 "_pal_scene_state": ("STRING",),
@@ -65,7 +67,7 @@ class PALNode:
                 glb_path="", GLB=None, OBJ=None, model_3d=None,
                 prompt="", camera_preset="eye_level",
                 frame_start=1, frame_end=24, render_width=512, render_height=512,
-                scene_json_in="", _pal_scene_state="{}"):
+                scene_json_in="", use_local_renderer=False, _pal_scene_state="{}"):
 
         render_width = min(max(render_width, 64), 1024)
         render_height = min(max(render_height, 64), 1024)
@@ -107,11 +109,41 @@ class PALNode:
             "imported_models": imported_models,
         })
 
-        beauty = self._decode_pass(state.get("beauty_b64"), render_width, render_height)
         # Gate: depth/normal passes require paid plan (multipass feature)
         has_multipass = plan != "free"
-        depth = self._decode_pass(state.get("depth_b64"), render_width, render_height, channels=1) if has_multipass else self._blank(render_width, render_height, 1)
-        normals = self._decode_pass(state.get("normal_b64"), render_width, render_height) if has_multipass else self._blank(render_width, render_height)
+
+        # Pass generation — two paths:
+        #  1. Local renderer (pygfx, offscreen) — direct render, no iframe needed
+        #  2. Iframe round-trip — decode base64 passes from _pal_scene_state
+        alpha = self._blank(render_width, render_height, 1)
+        id_matte = self._blank(render_width, render_height)
+
+        if use_local_renderer:
+            model_path = self._pick_local_model_path(glb_path, model_3d, GLB, OBJ)
+            camera_kwargs = self._camera_from_state(state.get("camera"))
+            try:
+                from .pal_renderer import render_model
+                passes_wanted = ["beauty", "alpha", "normal"]
+                if has_multipass:
+                    passes_wanted += ["depth", "id_matte"]
+                result = render_model(
+                    model_path, width=render_width, height=render_height,
+                    passes=passes_wanted, **camera_kwargs,
+                )
+                beauty = result.get("beauty", self._blank(render_width, render_height))
+                alpha = result.get("alpha", alpha)
+                normals = result.get("normal", self._blank(render_width, render_height))
+                depth = result.get("depth", self._blank(render_width, render_height, 1)) if has_multipass else self._blank(render_width, render_height, 1)
+                id_matte = result.get("id_matte", id_matte) if has_multipass else id_matte
+            except Exception as e:
+                logger.warning(f"[PAL Node] Local renderer failed, falling back to iframe state: {e}")
+                use_local_renderer = False  # fall through to iframe decode below
+
+        if not use_local_renderer:
+            beauty = self._decode_pass(state.get("beauty_b64"), render_width, render_height)
+            depth = self._decode_pass(state.get("depth_b64"), render_width, render_height, channels=1) if has_multipass else self._blank(render_width, render_height, 1)
+            normals = self._decode_pass(state.get("normal_b64"), render_width, render_height) if has_multipass else self._blank(render_width, render_height)
+            alpha = self._decode_pass(state.get("alpha_b64"), render_width, render_height, channels=1) if has_multipass else self._blank(render_width, render_height, 1)
 
         scene_data = state.get("scene", resolved.get("scene_state", {}))
         if isinstance(scene_data, str):
@@ -134,7 +166,8 @@ class PALNode:
         return (beauty, depth, normals, scene_json, camera_json,
                 resolved.get("frame_start", frame_start),
                 resolved.get("frame_end", frame_end),
-                sequence_json)
+                sequence_json,
+                alpha, id_matte)
 
     def _decode_pass(self, b64_str, width, height, channels=3):
         if not b64_str or len(b64_str) > MAX_BASE64_BYTES:
@@ -216,3 +249,36 @@ class PALNode:
 
     def _blank(self, w, h, c=3):
         return np.zeros((1, h, w, c), dtype=np.float32)
+
+    def _pick_local_model_path(self, glb_path, model_3d, glb_input, obj_input):
+        """Choose the first usable on-disk model path for the local renderer."""
+        import os
+        candidates = [model_3d, glb_input, obj_input, glb_path]
+        for c in candidates:
+            if isinstance(c, str) and c.strip() and os.path.isfile(c.strip()):
+                return c.strip()
+        raise FileNotFoundError(
+            "use_local_renderer=True but no on-disk model path found on any "
+            "3D input (model_3d, GLB, OBJ, glb_path). Connect Load3D's model_3d "
+            "output, or pass a file path via glb_path."
+        )
+
+    def _camera_from_state(self, cam):
+        """Parse camera dict from _pal_scene_state into render_model kwargs. Defensive."""
+        if not isinstance(cam, dict):
+            return {}
+        kwargs = {}
+        pos = cam.get("position")
+        if isinstance(pos, dict):
+            kwargs["camera_position"] = (float(pos.get("x", 3)), float(pos.get("y", 3)), float(pos.get("z", 5)))
+        elif isinstance(pos, (list, tuple)) and len(pos) >= 3:
+            kwargs["camera_position"] = (float(pos[0]), float(pos[1]), float(pos[2]))
+        tgt = cam.get("target")
+        if isinstance(tgt, dict):
+            kwargs["camera_target"] = (float(tgt.get("x", 0)), float(tgt.get("y", 0)), float(tgt.get("z", 0)))
+        elif isinstance(tgt, (list, tuple)) and len(tgt) >= 3:
+            kwargs["camera_target"] = (float(tgt[0]), float(tgt[1]), float(tgt[2]))
+        fov = cam.get("fov")
+        if isinstance(fov, (int, float)):
+            kwargs["fov"] = float(fov)
+        return kwargs

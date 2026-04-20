@@ -604,9 +604,14 @@ app.registerExtension({
           const features = new Set(this._lcSession?.features || [...FREE_FEATURES]);
           this._palState.beauty_b64 = msg.beauty;
           // Gate: depth/normal/alpha require multipass feature
-          this._palState.depth_b64 = features.has("multipass") ? msg.depth : "";
-          this._palState.normal_b64 = features.has("multipass") ? msg.normals : "";
+          this._palState.depth_b64  = features.has("multipass") ? (msg.depth   || "") : "";
+          this._palState.normal_b64 = features.has("multipass") ? (msg.normals || "") : "";
+          this._palState.alpha_b64  = features.has("multipass") ? (msg.alpha   || "") : "";
           this._palRendered = true;
+          // Flush to the hidden widget immediately so the queue reads current
+          // state even if the user queues without re-entering the modal.
+          const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
+          if (widget) widget.value = JSON.stringify(this._palState || {});
           this._updateSummary();
           if (!features.has("multipass") && (msg.depth || msg.normals)) {
             this._lcShowUpgradeModal("Depth / Normal passes", "COMFY PAL");
@@ -789,6 +794,13 @@ app.registerExtension({
   async beforeQueuePrompt(graph) {
     const palNodes = graph._nodes?.filter(n => n.type === "PALLayoutNode") || [];
     for (const node of palNodes) {
+      // Flush the latest _palState into the hidden widget on every queue.
+      // Otherwise users who render via the iframe dialog and queue without
+      // clicking "Save & Close" get stale/empty widget content, execute()
+      // decodes blanks, and Video Combine sees nothing.
+      const widget = node.widgets?.find(w => w.name === "_pal_scene_state");
+      if (widget) widget.value = JSON.stringify(node._palState || {});
+
       if (node._palState && Object.keys(node._palState).length > 0 && !node._palRendered) {
         // State exists but passes not rendered — warn user
         const msg = "PAL viewport has unsaved renders. Click 'Render All' in the viewport before queuing.";
