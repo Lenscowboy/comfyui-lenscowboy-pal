@@ -199,7 +199,18 @@ class PALNode:
         if not b64_str or len(b64_str) > MAX_BASE64_BYTES:
             return self._blank(width, height, channels)
         try:
-            img = Image.open(io.BytesIO(base64.b64decode(b64_str)))
+            raw = base64.b64decode(b64_str)
+            img = Image.open(io.BytesIO(raw))
+            # Diagnostic: dump decoded pass to /tmp so we can visually verify
+            # what the iframe actually captured. One file per channel kind.
+            try:
+                import os, sys
+                tag = "gray" if channels == 1 else "rgb"
+                dbg_path = f"/tmp/pal_{tag}_{img.size[0]}x{img.size[1]}.png"
+                img.save(dbg_path)
+                print(f"[PAL Node] decoded {tag} pass {img.size[0]}x{img.size[1]} ({len(raw)} bytes) -> {dbg_path}", file=sys.stderr, flush=True)
+            except Exception as e:
+                import sys as _s; print(f"[PAL Node] dbg dump failed: {e}", file=_s.stderr, flush=True)
             if channels == 1:
                 # ComfyUI IMAGE expects (H,W,3) RGB even for grayscale passes.
                 # PIL.Image.fromarray can't handle (H,W,1). Replicate grayscale
@@ -209,7 +220,8 @@ class PALNode:
             else:
                 arr = np.array(img.convert("RGB"), dtype=np.float32) / 255.0
             return self._to_image_tensor(arr[np.newaxis, ...])
-        except Exception:
+        except Exception as e:
+            import sys as _s; print(f"[PAL Node] _decode_pass exception: {e}", file=_s.stderr, flush=True)
             return self._blank(width, height, channels)
 
     def _resolve_models(self, glb_path="", glb_input=None, obj_input=None, model_3d_input=None):
