@@ -18,7 +18,7 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-MAX_BASE64_BYTES = 15_000_000
+MAX_BASE64_BYTES = 30_000_000
 
 
 class PALNode:
@@ -49,8 +49,8 @@ class PALNode:
                 "camera_preset": ("STRING",  {"default": "eye_level"}),
                 "frame_start":   ("INT",     {"default": 1, "min": 0, "max": 9999}),
                 "frame_end":     ("INT",     {"default": 24, "min": 1, "max": 9999}),
-                "render_width":  ("INT",     {"default": 512, "min": 64, "max": 1024, "step": 64}),
-                "render_height": ("INT",     {"default": 512, "min": 64, "max": 1024, "step": 64}),
+                "render_width":  ("INT",     {"default": 512, "min": 64, "max": 2048, "step": 64}),
+                "render_height": ("INT",     {"default": 512, "min": 64, "max": 2048, "step": 64}),
                 "scene_json_in": ("STRING",  {"default": ""}),
                 "use_local_renderer": ("BOOLEAN", {"default": False}),
             },
@@ -69,8 +69,8 @@ class PALNode:
                 frame_start=1, frame_end=24, render_width=512, render_height=512,
                 scene_json_in="", use_local_renderer=False, _pal_scene_state="{}"):
 
-        render_width = min(max(render_width, 64), 1024)
-        render_height = min(max(render_height, 64), 1024)
+        render_width = min(max(render_width, 64), 2048)
+        render_height = min(max(render_height, 64), 2048)
 
         try:
             state = json.loads(_pal_scene_state) if _pal_scene_state else {}

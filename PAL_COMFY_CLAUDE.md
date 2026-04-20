@@ -75,7 +75,7 @@ All inputs are optional.
 | `prompt` | STRING | Scene description for proxy generation |
 | `camera_preset` | STRING | Camera height preset (eye_level, low_angle, etc.) |
 | `frame_start` / `frame_end` | INT | Animation frame range |
-| `render_width` / `render_height` | INT | Render resolution (64–1024) |
+| `render_width` / `render_height` | INT | Render resolution (64–2048) |
 | `scene_json_in` | STRING | Scene state from another PAL node |
 | `use_local_renderer` | BOOLEAN | When true, render via pygfx instead of iframe |
 
@@ -184,7 +184,7 @@ ComfyUI users are 3D artists, not necessarily full LensCowboy SaaS subscribers. 
 | Viewport, proxies, GLB/OBJ/FBX import | ✓ | ✓ | ✓ | ✓ |
 | Camera / animation (local to node) | ✓ | ✓ | ✓ | ✓ |
 | Beauty render ≤ 512 | ✓ | ✓ | ✓ | ✓ |
-| Beauty render > 512 (up to 1024) | ✗ | ✓ | ✓ | ✓ |
+| Beauty render > 512 (up to 2048) | ✗ | ✓ | ✓ | ✓ |
 | Depth / Normal / Alpha / ID matte passes | ✗ | ✓ | ✓ | ✓ |
 | Local renderer (`use_local_renderer`) | ✓ | ✓ | ✓ | ✓ |
 | Save to Drive (render output) | ✗ | ✗ | ✓ | ✓ |
