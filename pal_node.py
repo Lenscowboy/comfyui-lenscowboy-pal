@@ -53,10 +53,12 @@ class PALNode:
                 "render_height": ("INT",     {"default": 512, "min": 64, "max": 2048, "step": 64}),
                 "scene_json_in": ("STRING",  {"default": ""}),
                 "use_local_renderer": ("BOOLEAN", {"default": False}),
+                # Scene state carrier. Declared optional (not hidden) so
+                # ComfyUI's queue serializer actually sends its widget value
+                # back at execute time. JS hides the widget visually in
+                # onNodeCreated so it doesn't clutter the node UI.
+                "_pal_scene_state": ("STRING", {"default": "{}", "multiline": True}),
             },
-            "hidden": {
-                "_pal_scene_state": ("STRING",),
-            }
         }
 
     @classmethod
