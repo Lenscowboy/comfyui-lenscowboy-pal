@@ -112,6 +112,16 @@ app.registerExtension({
       this._lcBreakdown = null;        // { description, camera_notes, lighting_notes, vfx_type }
       this._lcShotList = [];           // cached shots for sequence export
 
+      // Hidden state widget — ComfyUI's frontend doesn't auto-create widgets
+      // for Python-side hidden inputs, so we add one explicitly. Serialized
+      // with the node but draws zero-height so it's invisible.
+      this._stateWidget = this.addWidget("text", "_pal_scene_state", "{}", () => {}, {
+        serialize: true,
+      });
+      this._stateWidget.computeSize = () => [0, -4];
+      this._stateWidget.draw = () => {};
+      this._stateWidget.hidden = true;
+
       // Add Open Viewport button widget
       const btn = this.addWidget("button", "Open Viewport", "open_viewport", () => {
         this._openViewport();
