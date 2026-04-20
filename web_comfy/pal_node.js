@@ -615,14 +615,15 @@ app.registerExtension({
         const msg = e.data;
         if (!msg || !msg.type) return;
         if (msg.type === "pal:state" && msg.state) {
-          // Merge incoming scene/camera/settings WITHOUT clobbering the
-          // render passes (beauty_b64 etc.) that pal:render previously
+          // Merge incoming scene/camera/settings/cameraSystem WITHOUT clobbering
+          // the render passes (beauty_b64 etc.) that pal:render previously
           // wrote onto _palState. Wholesale replacement was wiping the
           // captured render every time the user clicked Save & Close.
           const s = msg.state;
-          if (s.scene)    this._palState.scene    = { ...(this._palState.scene || {}), ...s.scene };
-          if (s.camera)   this._palState.camera   = s.camera;
-          if (s.settings) this._palState.settings = s.settings;
+          if (s.scene)        this._palState.scene        = { ...(this._palState.scene || {}), ...s.scene };
+          if (s.camera)       this._palState.camera       = s.camera;
+          if (s.settings)     this._palState.settings     = s.settings;
+          if (s.cameraSystem) this._palState.cameraSystem = s.cameraSystem;
         }
         if (msg.type === "pal:render") {
           const features = new Set(this._lcSession?.features || [...FREE_FEATURES]);
@@ -681,6 +682,7 @@ app.registerExtension({
         const savedScene = this._palState?.scene;
         const savedCamera = this._palState?.camera;
         const savedSettings = this._palState?.settings;
+        const savedCameraSystem = this._palState?.cameraSystem;
 
         if (iframe.contentWindow) {
           // Small delay to let PAL init complete before posting state.
@@ -693,10 +695,10 @@ app.registerExtension({
             // re-serialising them as "imported_asset" proxies causes
             // viewer.loadScene to race the async FBX loader and drop a
             // prop_generic placeholder (tetrahedron) on top of the real mesh.
-            // Only keyframes and settings ride along here.
-            const loadStatePayload = { scene: {}, settings: savedSettings };
+            // Only keyframes, settings, and camera system ride along here.
+            const loadStatePayload = { scene: {}, settings: savedSettings, cameraSystem: savedCameraSystem };
             if (savedScene?.keyframes) loadStatePayload.scene.keyframes = savedScene.keyframes;
-            if (loadStatePayload.scene.keyframes || savedSettings) {
+            if (loadStatePayload.scene.keyframes || savedSettings || savedCameraSystem) {
               iframe.contentWindow.postMessage({ type: "pal:load-state", state: loadStatePayload }, "*");
             }
             if (savedCamera && (savedCamera.position || savedCamera.quaternion)) {
@@ -836,8 +838,10 @@ app.registerExtension({
             if (e.source !== iframe.contentWindow) return;
             if (e.data?.type === "pal:state" && e.data?.state) {
               const st = e.data.state;
-              if (st.scene) this._palState.scene = { ...(this._palState.scene || {}), ...st.scene };
-              if (st.camera) this._palState.camera = st.camera;
+              if (st.scene)        this._palState.scene        = { ...(this._palState.scene || {}), ...st.scene };
+              if (st.camera)       this._palState.camera       = st.camera;
+              if (st.settings)     this._palState.settings     = st.settings;
+              if (st.cameraSystem) this._palState.cameraSystem = st.cameraSystem;
               done();
             }
           };
