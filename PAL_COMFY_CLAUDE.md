@@ -187,9 +187,11 @@ ComfyUI users are 3D artists, not necessarily full LensCowboy SaaS subscribers. 
 | Beauty render > 512 (up to 1024) | ✗ | ✓ | ✓ | ✓ |
 | Depth / Normal / Alpha / ID matte passes | ✗ | ✓ | ✓ | ✓ |
 | Local renderer (`use_local_renderer`) | ✓ | ✓ | ✓ | ✓ |
-| Project load / pipeline writeback | ✗ | ✗ | ✓ | ✓ |
+| Save to Drive (render output) | ✗ | ✗ | ✓ | ✓ |
+| Project load | ✗ | ✗ | ✓ | ✓ |
 | Sequence export (multi-shot) | ✗ | ✗ | ✗ | ✓ |
-| Breakdown integration | ✗ | ✗ | ✗ | ✓ |
+| Pipeline writeback (Export to Pipeline) | ✗ | ✗ | ✗ | ✓ |
+| Breakdown integration (Load from Breakdown) | ✗ | ✗ | ✗ | ✓ |
 
 ### Pricing
 
@@ -216,12 +218,15 @@ Lives in [`app/pal_comfy.py`](../lenscowboy-pipeline-saas/app/pal_comfy.py) `_PL
 ```python
 "free":          ["viewport", "beauty_512"]
 "comfy_pal":     ["viewport", "beauty_512", "beauty_hires", "multipass"]
-"creator":       ["viewport", "beauty_512", "beauty_hires", "multipass"]
-"influencer":    ["viewport", "beauty_512", "beauty_hires", "multipass"]
-"pro":           ["viewport", "beauty_512", "beauty_hires", "multipass"]
-"studio":        ["viewport", "beauty_512", "beauty_hires", "multipass"]
-"enterprise":    ["viewport", "beauty_512", "beauty_hires", "multipass", "sequence_export", "breakdown"]
+"creator":       ["viewport", "beauty_512", "beauty_hires", "multipass", "drive_save"]
+"influencer":    ["viewport", "beauty_512", "beauty_hires", "multipass", "drive_save"]
+"pro":           ["viewport", "beauty_512", "beauty_hires", "multipass", "drive_save"]
+"studio":        ["viewport", "beauty_512", "beauty_hires", "multipass", "drive_save"]
+"enterprise":    ["viewport", "beauty_512", "beauty_hires", "multipass", "drive_save",
+                  "sequence_export", "breakdown", "pipeline_writeback"]
 ```
+
+The iframe fetches this at boot via `GET /pal/comfy/features` (tolerant of missing auth — anonymous callers receive the free feature set). Results cached in `window._palFeatures` and used by the Render/Export dialog and the Load-from-Breakdown / Export-to-Pipeline buttons to lock UI up front rather than failing at submit with a 401.
 
 ### Gate behaviour
 
