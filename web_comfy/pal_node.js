@@ -269,6 +269,59 @@ app.registerExtension({
       setTimeout(() => { toast.remove(); }, 2600);
     };
 
+    /* ── Plan-gate modal: clearer than a toast, has upgrade CTA ─── */
+    nodeType.prototype._lcShowUpgradeModal = function (feature, requiredPlan) {
+      // De-dupe: don't stack if already open
+      if (document.getElementById("pal-comfy-upgrade-modal")) return;
+
+      const overlay = document.createElement("div");
+      overlay.id = "pal-comfy-upgrade-modal";
+      overlay.style.cssText = `
+        position:fixed;inset:0;z-index:10002;
+        background:rgba(0,0,0,.72);backdrop-filter:blur(4px);
+        display:flex;align-items:center;justify-content:center;
+        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      `;
+
+      const card = document.createElement("div");
+      card.style.cssText = `
+        background:#161614;border:1px solid #2a2a26;border-radius:10px;
+        padding:28px 32px;max-width:440px;color:#ddd;
+        box-shadow:0 20px 60px rgba(0,0,0,.6);
+      `;
+      card.innerHTML = `
+        <div style="color:#f5c400;font-size:11px;letter-spacing:1.5px;font-family:monospace;margin-bottom:10px">LENSCOWBOY</div>
+        <h2 style="margin:0 0 10px;font-size:20px;font-weight:600;color:#fff">${feature} requires ${requiredPlan}</h2>
+        <p style="margin:0 0 20px;font-size:13px;line-height:1.55;color:#aaa">
+          You're on the Free tier. Upgrade to ${requiredPlan} to unlock depth, normal,
+          alpha and ID matte passes — all rendered locally on your own machine.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <a href="https://lenscowboy.com/pricing" target="_blank" rel="noopener"
+             style="flex:1;min-width:150px;display:inline-block;text-align:center;
+                    padding:10px 18px;border-radius:6px;text-decoration:none;
+                    background:#f5c400;color:#111;font-weight:600;font-size:13px">
+            View pricing
+          </a>
+          <button id="pal-comfy-upgrade-close"
+             style="flex:0 0 auto;padding:10px 18px;border-radius:6px;cursor:pointer;
+                    background:transparent;color:#888;border:1px solid #2a2a26;font-size:13px">
+            Dismiss
+          </button>
+        </div>
+      `;
+
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+
+      const close = () => overlay.remove();
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+      card.querySelector("#pal-comfy-upgrade-close").addEventListener("click", close);
+      document.addEventListener("keydown", function esc(e) {
+        if (e.key === "Escape") { close(); document.removeEventListener("keydown", esc); }
+      });
+    };
+
     nodeType.prototype._openViewport = function () {
       // Create fullscreen modal
       const modal = document.createElement("div");
@@ -428,9 +481,11 @@ app.registerExtension({
 
       const btnStyle = "padding:4px 12px;border-radius:4px;font-family:monospace;font-size:10px;cursor:pointer;";
 
-      headerRight.innerHTML = `
-        <button id="pal-comfy-render" style="${btnStyle}background:rgba(245,196,0,.1);border:1px solid rgba(245,196,0,.3);color:#f5c400">Render All</button>
-      `;
+      // Render All lives inside the iframe's native PAL toolbar — don't
+      // duplicate it in the comfy wrapper. headerRight starts empty and
+      // only gains buttons for comfy-specific actions (Send to Pipeline,
+      // Export Sequence) that the iframe doesn't own.
+      headerRight.innerHTML = "";
 
       // Phase 3 — Send to Pipeline button (gated by features)
       const features = this._lcSession?.features || [];
@@ -554,10 +609,7 @@ app.registerExtension({
           this._palRendered = true;
           this._updateSummary();
           if (!features.has("multipass") && (msg.depth || msg.normals)) {
-            this._lcShowToast(
-              document.getElementById("pal-comfy-viewport"),
-              "Depth/Normal passes require Creator plan \u2014 lenscowboy.com/pricing", true
-            );
+            this._lcShowUpgradeModal("Depth / Normal passes", "COMFY PAL");
           }
         }
       };
@@ -581,13 +633,6 @@ app.registerExtension({
           }, 1500);
         }
       });
-
-      // Render All — request passes from PAL iframe
-      document.getElementById("pal-comfy-render").onclick = () => {
-        if (iframe?.contentWindow) {
-          iframe.contentWindow.postMessage({ type: "pal:render-request" }, "*");
-        }
-      };
 
       // Phase 3 — Send to Pipeline handler
       const wbBtnEl = document.getElementById("pal-comfy-writeback");
