@@ -1,0 +1,8 @@
+# PAL local renderer dependencies.
+# Installed separately from the main comfy node so the node can load
+# even when the renderer isn't available (graceful fallback to iframe).
+pygfx>=0.7
+rendercanvas>=2.0
+trimesh>=4.0
+imageio>=2.34
+numpy>=1.24
