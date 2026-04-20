@@ -160,9 +160,16 @@ class PALNode:
 
         if not use_local_renderer:
             beauty = self._decode_pass(state.get("beauty_b64"), render_width, render_height)
-            depth = self._decode_pass(state.get("depth_b64"), render_width, render_height, channels=1) if has_multipass else self._blank(render_width, render_height, 1)
-            normals = self._decode_pass(state.get("normal_b64"), render_width, render_height) if has_multipass else self._blank(render_width, render_height)
-            alpha = self._decode_pass(state.get("alpha_b64"), render_width, render_height, channels=1) if has_multipass else self._blank(render_width, render_height, 1)
+            # Use the ACTUAL beauty dimensions for blank/missing passes so
+            # we don't end up with a 512×288 beauty next to a 512×512 normal.
+            # Beauty tensor shape is (1, H, W, 3).
+            try:
+                _bh = int(beauty.shape[1]); _bw = int(beauty.shape[2])
+            except Exception:
+                _bh, _bw = render_height, render_width
+            depth = self._decode_pass(state.get("depth_b64"), _bw, _bh, channels=1) if has_multipass else self._blank(_bw, _bh, 1)
+            normals = self._decode_pass(state.get("normal_b64"), _bw, _bh) if has_multipass else self._blank(_bw, _bh)
+            alpha = self._decode_pass(state.get("alpha_b64"), _bw, _bh, channels=1) if has_multipass else self._blank(_bw, _bh, 1)
 
         scene_data = state.get("scene", resolved.get("scene_state", {}))
         if isinstance(scene_data, str):
