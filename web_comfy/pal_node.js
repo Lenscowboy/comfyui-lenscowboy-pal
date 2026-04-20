@@ -646,6 +646,19 @@ app.registerExtension({
           if (!features.has("multipass") && (msg.depth || msg.normals)) {
             this._lcShowUpgradeModal("Depth / Normal passes", "COMFY PAL");
           }
+          // Auto-queue the ComfyUI graph so the rendered beauty shows up
+          // in downstream Preview / Video Combine nodes immediately —
+          // user's expected flow is "press Render → see result", not
+          // "press Render, close modal, press Run, see result".
+          try {
+            if (typeof app?.queuePrompt === "function") {
+              // Short delay so the widget value sees the flush before the
+              // prompt is serialised for queue.
+              setTimeout(() => {
+                try { app.queuePrompt(0, 1); } catch (err) { console.warn("[PAL comfy] auto-queue failed:", err); }
+              }, 80);
+            }
+          } catch (err) { console.warn("[PAL comfy] auto-queue dispatch failed:", err); }
         }
       };
       window.addEventListener("message", _iframeHandler);
