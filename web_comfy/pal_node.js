@@ -26,6 +26,70 @@ const BADGE = {
 /* ── Feature helpers ─────────────────────────────────────────────── */
 const FREE_FEATURES = new Set(["viewport", "beauty_512"]);
 
+/* ── Upstream model resolution ──────────────────────────────────────
+ * Reads models from upstream nodes connected to GLB / OBJ / model_3d
+ * BEFORE the user has queued a prompt, so the viewport shows them on
+ * first open. Only Load3D-style nodes (with a `model_file` widget) are
+ * supported — upstream AI 3D generators (Hunyuan3D, Meshy, Tripo…)
+ * flow through execute() → _palState and work on subsequent opens.
+ */
+const UPSTREAM_INPUT_NAMES = ["GLB", "OBJ", "model_3d"];
+
+function _bytesToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+async function _collectUpstreamModels(node) {
+  const models = [];
+  if (!node?.inputs || !node?.graph) return models;
+
+  for (const input of node.inputs) {
+    if (!UPSTREAM_INPUT_NAMES.includes(input.name)) continue;
+    if (input.link == null) continue;
+    const link = node.graph.links?.[input.link];
+    if (!link) continue;
+    const origin = node.graph.getNodeById(link.origin_id);
+    if (!origin) continue;
+
+    // Load3D and similar nodes expose the selected file as a `model_file` widget
+    const widget = origin.widgets?.find(w => w.name === "model_file");
+    const value = widget?.value;
+    if (!value || typeof value !== "string") continue;
+
+    const modelFile = value.trim();
+    if (!modelFile) continue;
+
+    const slash = modelFile.lastIndexOf("/");
+    const subfolder = slash >= 0 ? modelFile.slice(0, slash) : "3d";
+    const filename = slash >= 0 ? modelFile.slice(slash + 1) : modelFile;
+    const ext = filename.split(".").pop().toLowerCase();
+
+    try {
+      const url = `/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const buf = await resp.arrayBuffer();
+      models.push({
+        id: `upstream_${input.name}_${origin.id}`,
+        name: filename,
+        format: ext,
+        data: _bytesToBase64(buf),
+      });
+      console.log(`[PAL comfy] Fetched upstream ${input.name} from node ${origin.id}: ${filename}`);
+    } catch (err) {
+      console.warn(`[PAL comfy] Failed to fetch upstream model for ${input.name}:`, err);
+    }
+  }
+
+  return models;
+}
+
 app.registerExtension({
   name: EXT_NAME,
 
@@ -501,11 +565,14 @@ app.registerExtension({
       this._iframeCleanup = () => window.removeEventListener("message", _iframeHandler);
 
       // Send imported models to PAL iframe after it loads
-      iframe.addEventListener("load", () => {
+      iframe.addEventListener("load", async () => {
         // Models from graph connections are in _palState after execute()
         const stateModels = this._palState?.scene?.imported_models || [];
         const glbPath = this.widgets?.find(w => w.name === "glb_path")?.value || "";
-        const models = [...stateModels];
+        // Walk graph for upstream models so the viewport shows them on first open,
+        // before the user has queued a prompt (which is what populates _palState).
+        const upstreamModels = await _collectUpstreamModels(this);
+        const models = [...stateModels, ...upstreamModels];
         if (glbPath) models.push({ id: "glb_path", name: glbPath.split("/").pop(), format: "glb", path: glbPath });
         if (models.length && iframe.contentWindow) {
           // Small delay to let PAL init complete

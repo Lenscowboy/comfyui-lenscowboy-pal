@@ -43,6 +43,7 @@ class PALNode:
                 "glb_path":      ("STRING",  {"default": ""}),
                 "GLB":           (("FILE_3D_GLB", "FILE_3D", "MESH", "STRING"),),
                 "OBJ":           (("FILE_3D_OBJ", "FILE_3D", "MESH", "STRING"),),
+                "model_3d":      ("FILE_3D",),
                 "prompt":        ("STRING",  {"default": "", "multiline": True}),
                 "camera_preset": ("STRING",  {"default": "eye_level"}),
                 "frame_start":   ("INT",     {"default": 1, "min": 0, "max": 9999}),
@@ -61,7 +62,7 @@ class PALNode:
         return float("nan")
 
     def execute(self, lc_api_key="", lc_project_id="", lc_shot_id="",
-                glb_path="", GLB=None, OBJ=None,
+                glb_path="", GLB=None, OBJ=None, model_3d=None,
                 prompt="", camera_preset="eye_level",
                 frame_start=1, frame_end=24, render_width=512, render_height=512,
                 scene_json_in="", _pal_scene_state="{}"):
@@ -92,7 +93,7 @@ class PALNode:
 
         # Resolve model inputs — accept file paths or base64 data from upstream nodes
         try:
-            imported_models = self._resolve_models(glb_path, GLB, OBJ)
+            imported_models = self._resolve_models(glb_path, GLB, OBJ, model_3d)
         except Exception as e:
             logger.warning(f"[PAL Node] Model resolve failed: {e}")
             imported_models = []
@@ -148,7 +149,7 @@ class PALNode:
         except Exception:
             return self._blank(width, height, channels)
 
-    def _resolve_models(self, glb_path="", glb_input=None, obj_input=None):
+    def _resolve_models(self, glb_path="", glb_input=None, obj_input=None, model_3d_input=None):
         """Build imported_models list from inputs. Accepts file paths, base64 strings, or bytes."""
         import os
         models = []
@@ -172,7 +173,21 @@ class PALNode:
         if obj_input is not None:
             models.append(self._coerce_model(obj_input, "obj_input", "obj"))
 
+        # model_3d — generic FILE_3D input (e.g. from native Load3D). Format from extension.
+        if model_3d_input is not None:
+            fmt = self._detect_3d_format(model_3d_input)
+            models.append(self._coerce_model(model_3d_input, "model_3d_input", fmt))
+
         return [m for m in models if m]
+
+    def _detect_3d_format(self, value):
+        """Detect 3D file format from a path string's extension. Defaults to glb."""
+        import os
+        if isinstance(value, str):
+            ext = os.path.splitext(value.strip())[1].lower().lstrip(".")
+            if ext in ("glb", "gltf", "obj", "fbx", "stl", "usdz"):
+                return ext
+        return "glb"
 
     def _coerce_model(self, value, model_id, fmt):
         """Convert any upstream node output to a model dict with base64 data."""
