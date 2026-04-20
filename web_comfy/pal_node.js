@@ -642,7 +642,10 @@ app.registerExtension({
       window.addEventListener("message", _iframeHandler);
       this._iframeCleanup = () => window.removeEventListener("message", _iframeHandler);
 
-      // Send imported models to PAL iframe after it loads
+      // Send imported models + scene + camera state to PAL iframe after load.
+      // The node owns persistence via _palState, so reopening the viewport
+      // should restore everything the user had before closing — camera
+      // position, scene objects, and imported model geometry.
       iframe.addEventListener("load", async () => {
         // Models from graph connections are in _palState after execute()
         const stateModels = this._palState?.scene?.imported_models || [];
@@ -652,10 +655,22 @@ app.registerExtension({
         const upstreamModels = await _collectUpstreamModels(this);
         const models = [...stateModels, ...upstreamModels];
         if (glbPath) models.push({ id: "glb_path", name: glbPath.split("/").pop(), format: "glb", path: glbPath });
-        if (models.length && iframe.contentWindow) {
-          // Small delay to let PAL init complete
+
+        const savedScene = this._palState?.scene;
+        const savedCamera = this._palState?.camera;
+
+        if (iframe.contentWindow) {
+          // Small delay to let PAL init complete before posting state.
           setTimeout(() => {
-            iframe.contentWindow.postMessage({ type: "pal:load-models", models }, "*");
+            if (models.length) {
+              iframe.contentWindow.postMessage({ type: "pal:load-models", models }, "*");
+            }
+            if (savedScene && (savedScene.objects?.length || savedScene.keyframes)) {
+              iframe.contentWindow.postMessage({ type: "pal:load-state", state: { scene: savedScene } }, "*");
+            }
+            if (savedCamera && (savedCamera.position || savedCamera.quaternion)) {
+              iframe.contentWindow.postMessage({ type: "pal:set-camera", camera: savedCamera }, "*");
+            }
           }, 1500);
         }
       });
