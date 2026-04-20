@@ -293,11 +293,15 @@ The iframe is the SaaS PAL UI. Do not fork SaaS features for comfy — reuse. Ac
 
 ## Testing
 
+### Manual
 1. Place node in ComfyUI graph
 2. Paste API key → connection badge turns green → "Open Viewport" loads iframe
 3. Connect Load3D / Hunyuan3D output to `model_3d` input → model appears in viewport on open (graph walk)
 4. Render passes via iframe, OR enable `use_local_renderer` for direct Python render
 5. Queue prompt → beauty/depth/normal/alpha/id_matte flow downstream
+
+### TODO — ComfyUI node integration test
+We've had multiple rounds of "no frame reaches Video Combine" bugs caused by Python/JS widget-serialization mismatches that are invisible until you queue a real prompt. Needs a headless integration test: spin up ComfyUI in CI, load a workflow JSON with `PALLayoutNode` → `PreviewImage`, seed `_pal_scene_state` with a known beauty base64, POST to `/prompt`, assert the output image is non-blank and matches expected pixel hash. Catches widget-wiring, INPUT_TYPES drift, decode path regressions automatically. Complementary SaaS-side Playwright todo is in `lenscowboy-pipeline-saas/CLAUDE.md` under "Testing Changes → TODO".
 
 ## Deployment
 
