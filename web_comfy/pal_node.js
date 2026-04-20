@@ -614,7 +614,16 @@ app.registerExtension({
         if (e.source !== iframe.contentWindow) return;
         const msg = e.data;
         if (!msg || !msg.type) return;
-        if (msg.type === "pal:state") this._palState = msg.state || {};
+        if (msg.type === "pal:state" && msg.state) {
+          // Merge incoming scene/camera/settings WITHOUT clobbering the
+          // render passes (beauty_b64 etc.) that pal:render previously
+          // wrote onto _palState. Wholesale replacement was wiping the
+          // captured render every time the user clicked Save & Close.
+          const s = msg.state;
+          if (s.scene)    this._palState.scene    = { ...(this._palState.scene || {}), ...s.scene };
+          if (s.camera)   this._palState.camera   = s.camera;
+          if (s.settings) this._palState.settings = s.settings;
+        }
         if (msg.type === "pal:render") {
           const features = new Set(this._lcSession?.features || [...FREE_FEATURES]);
           this._palState.beauty_b64 = msg.beauty;
