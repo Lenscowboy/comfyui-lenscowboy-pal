@@ -611,7 +611,13 @@ app.registerExtension({
           // Flush to the hidden widget immediately so the queue reads current
           // state even if the user queues without re-entering the modal.
           const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
-          if (widget) widget.value = JSON.stringify(this._palState || {});
+          const stateJson = JSON.stringify(this._palState || {});
+          if (widget) {
+            widget.value = stateJson;
+            console.log(`[PAL comfy] pal:render — flushed state to widget (${stateJson.length} bytes, beauty=${this._palState.beauty_b64 ? "yes" : "no"})`);
+          } else {
+            console.warn(`[PAL comfy] pal:render — _pal_scene_state widget not found; widgets=`, this.widgets?.map(w => w.name));
+          }
           this._updateSummary();
           if (!features.has("multipass") && (msg.depth || msg.normals)) {
             this._lcShowUpgradeModal("Depth / Normal passes", "COMFY PAL");
@@ -799,7 +805,13 @@ app.registerExtension({
       // clicking "Save & Close" get stale/empty widget content, execute()
       // decodes blanks, and Video Combine sees nothing.
       const widget = node.widgets?.find(w => w.name === "_pal_scene_state");
-      if (widget) widget.value = JSON.stringify(node._palState || {});
+      const stateJson = JSON.stringify(node._palState || {});
+      if (widget) {
+        widget.value = stateJson;
+        console.log(`[PAL comfy] beforeQueuePrompt — flushed (${stateJson.length} bytes, beauty=${node._palState?.beauty_b64 ? "yes" : "no"}, rendered=${node._palRendered})`);
+      } else {
+        console.warn(`[PAL comfy] beforeQueuePrompt — _pal_scene_state widget not found; widgets=`, node.widgets?.map(w => w.name));
+      }
 
       if (node._palState && Object.keys(node._palState).length > 0 && !node._palRendered) {
         // State exists but passes not rendered — warn user
