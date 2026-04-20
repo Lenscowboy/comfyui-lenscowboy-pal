@@ -228,6 +228,22 @@ Lives in [`app/pal_comfy.py`](../lenscowboy-pipeline-saas/app/pal_comfy.py) `_PL
 
 The iframe fetches this at boot via `GET /pal/comfy/features` (tolerant of missing auth — anonymous callers receive the free feature set). Results cached in `window._palFeatures` and used by the Render/Export dialog and the Load-from-Breakdown / Export-to-Pipeline buttons to lock UI up front rather than failing at submit with a 401.
 
+### Admin & billing (SaaS-side)
+
+Lives in `lenscowboy-pipeline-saas/app/`. Already wired:
+
+- Paystack plan codes `PLN_45yu7i622128n7j` (monthly) and `PLN_amx7gja7evbrskw` (annual) map to internal plan `comfy_pal` in `billing.py:_map_paystack_plan`.
+- Webhook activates `subscriptions.comfy_pal` on the hub client with `cadence` (`monthly` / `annual`) and `since` timestamp via `_apply_hub_comfy_pal_subscription`. Existing SaaS-tier tenants are NOT downgraded — COMFY PAL stacks as a parallel subscription.
+- New tenants subscribing directly to COMFY PAL get `tenant.plan = "comfy_pal"` and a JWT unlocking multipass features.
+- Hub admin client page (`app/hub/web/client.html`) shows the COMFY PAL row in the Subscriptions table with cadence and activation date.
+- Schema entry in `app/hub_schema.py` under `subscriptions.comfy_pal`.
+
+**Still TODO (nice-to-haves, not blocking launch):**
+- **Cancel flow**: Paystack `subscription.disable` webhook currently calls `suspend_tenant` globally. For COMFY PAL cancellation on a tenant who also has a SaaS tier, we should just flip `subscriptions.comfy_pal.active = False` without suspending the tenant or clearing `tenant.plan`.
+- **Admin "cancel COMFY PAL" button**: manual off-switch in `client.html` that flips the flag without touching other subscriptions.
+- **Feature overrides panel**: `app/hub/web/admin.html` currently lets admins grant/revoke individual features against videobot tiers; extend to `comfy_pal` so per-tenant exceptions are possible.
+- **Usage metrics**: track render count per COMFY PAL tenant (cheap — just increment a counter on each `/pal/comfy/features` hit or render). Useful for validating $7 pricing once there's user data.
+
 ### Gate behaviour
 
 - No watermark on any tier — the 512px cap is the free-tier limit
