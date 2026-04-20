@@ -789,14 +789,35 @@ app.registerExtension({
       document.addEventListener("keydown", escHandler);
     };
 
-    nodeType.prototype._saveAndClose = function (modal) {
-      // Request state from iframe
+    nodeType.prototype._saveAndClose = async function (modal) {
       const iframe = modal.querySelector("iframe");
+
+      // Wait for the iframe's pal:state response BEFORE flushing + closing.
+      // Previously we posted pal:get-state and destroyed the modal on the
+      // same tick — the async reply arrived after the message listener was
+      // gone, so scene / camera / keyframes captured in the viewport were
+      // lost every time the user clicked Save & Close.
       if (iframe?.contentWindow) {
-        iframe.contentWindow.postMessage({ type: "pal:get-state" }, "*");
+        await new Promise((resolve) => {
+          let resolved = false;
+          const done = () => { if (resolved) return; resolved = true; window.removeEventListener("message", handler); resolve(); };
+          const handler = (e) => {
+            if (e.source !== iframe.contentWindow) return;
+            if (e.data?.type === "pal:state" && e.data?.state) {
+              const st = e.data.state;
+              if (st.scene) this._palState.scene = { ...(this._palState.scene || {}), ...st.scene };
+              if (st.camera) this._palState.camera = st.camera;
+              done();
+            }
+          };
+          window.addEventListener("message", handler);
+          iframe.contentWindow.postMessage({ type: "pal:get-state" }, "*");
+          // Safety timeout so a non-responsive iframe doesn't leave the modal orphaned
+          setTimeout(done, 1500);
+        });
       }
 
-      // Serialise scene state to hidden widget
+      // Serialise the freshest scene state to the hidden widget
       const stateJson = JSON.stringify(this._palState || {});
       const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
       if (widget) widget.value = stateJson;
