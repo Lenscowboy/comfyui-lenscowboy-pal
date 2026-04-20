@@ -194,7 +194,11 @@ class PALNode:
         try:
             img = Image.open(io.BytesIO(base64.b64decode(b64_str)))
             if channels == 1:
-                arr = np.array(img.convert("L"), dtype=np.float32)[..., np.newaxis] / 255.0
+                # ComfyUI IMAGE expects (H,W,3) RGB even for grayscale passes.
+                # PIL.Image.fromarray can't handle (H,W,1). Replicate grayscale
+                # across RGB so downstream preview/ControlNet depth nodes work.
+                gray = np.array(img.convert("L"), dtype=np.float32) / 255.0
+                arr = np.stack([gray, gray, gray], axis=-1)
             else:
                 arr = np.array(img.convert("RGB"), dtype=np.float32) / 255.0
             return self._to_image_tensor(arr[np.newaxis, ...])
@@ -267,7 +271,9 @@ class PALNode:
             return None
 
     def _blank(self, w, h, c=3):
-        return self._to_image_tensor(np.zeros((1, h, w, c), dtype=np.float32))
+        # ComfyUI IMAGE must be (B,H,W,3) — force RGB even when caller
+        # requested a single channel (depth / alpha gates during free tier).
+        return self._to_image_tensor(np.zeros((1, h, w, 3), dtype=np.float32))
 
     @staticmethod
     def _to_image_tensor(arr):
