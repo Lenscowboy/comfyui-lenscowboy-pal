@@ -75,13 +75,16 @@ class PALNode:
         render_height = min(max(render_height, 64), 2048)
 
         # Diagnostic: how much state did execute() actually receive from the queue?
+        # Using print+stderr+flush because ComfyUI Desktop doesn't always route
+        # logger.warning to the user-visible log file.
+        import sys as _sys
         _state_len = len(_pal_scene_state) if isinstance(_pal_scene_state, str) else 0
-        logger.warning(f"[PAL Node] execute() called — _pal_scene_state length={_state_len}")
+        print(f"[PAL Node] execute() called — _pal_scene_state type={type(_pal_scene_state).__name__} length={_state_len}", file=_sys.stderr, flush=True)
         try:
             state = json.loads(_pal_scene_state) if _pal_scene_state else {}
         except json.JSONDecodeError:
             state = {}
-        logger.warning(f"[PAL Node] state keys={list(state.keys())}, beauty_b64 present={'beauty_b64' in state and bool(state['beauty_b64'])}")
+        print(f"[PAL Node] state keys={list(state.keys())}, beauty_b64 present={'beauty_b64' in state and bool(state.get('beauty_b64'))}", file=_sys.stderr, flush=True)
 
         # Merge inputs + resolve plan
         lc_data = {}
