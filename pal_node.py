@@ -139,11 +139,21 @@ class PALNode:
                     model_path, width=render_width, height=render_height,
                     passes=passes_wanted, **camera_kwargs,
                 )
-                beauty = result.get("beauty", self._blank(render_width, render_height))
-                alpha = result.get("alpha", alpha)
-                normals = result.get("normal", self._blank(render_width, render_height))
-                depth = result.get("depth", self._blank(render_width, render_height, 1)) if has_multipass else self._blank(render_width, render_height, 1)
-                id_matte = result.get("id_matte", id_matte) if has_multipass else id_matte
+                # Local renderer returns numpy arrays — convert to torch
+                # tensors so downstream nodes (.cpu().numpy()) don't choke.
+                _beauty_np = result.get("beauty")
+                _alpha_np  = result.get("alpha")
+                _normal_np = result.get("normal")
+                _depth_np  = result.get("depth")
+                _idm_np    = result.get("id_matte")
+                beauty = self._to_image_tensor(_beauty_np) if _beauty_np is not None else self._blank(render_width, render_height)
+                alpha = self._to_image_tensor(_alpha_np) if _alpha_np is not None else alpha
+                normals = self._to_image_tensor(_normal_np) if _normal_np is not None else self._blank(render_width, render_height)
+                if has_multipass:
+                    depth = self._to_image_tensor(_depth_np) if _depth_np is not None else self._blank(render_width, render_height, 1)
+                    id_matte = self._to_image_tensor(_idm_np) if _idm_np is not None else id_matte
+                else:
+                    depth = self._blank(render_width, render_height, 1)
             except Exception as e:
                 logger.warning(f"[PAL Node] Local renderer failed, falling back to iframe state: {e}")
                 use_local_renderer = False  # fall through to iframe decode below
@@ -187,7 +197,7 @@ class PALNode:
                 arr = np.array(img.convert("L"), dtype=np.float32)[..., np.newaxis] / 255.0
             else:
                 arr = np.array(img.convert("RGB"), dtype=np.float32) / 255.0
-            return arr[np.newaxis, ...]
+            return self._to_image_tensor(arr[np.newaxis, ...])
         except Exception:
             return self._blank(width, height, channels)
 
@@ -257,7 +267,22 @@ class PALNode:
             return None
 
     def _blank(self, w, h, c=3):
-        return np.zeros((1, h, w, c), dtype=np.float32)
+        return self._to_image_tensor(np.zeros((1, h, w, c), dtype=np.float32))
+
+    @staticmethod
+    def _to_image_tensor(arr):
+        """Wrap a (1,H,W,C) float32 numpy array as a torch.Tensor — ComfyUI's
+        IMAGE type is torch, and downstream nodes call `.cpu().numpy()` which
+        fails on raw ndarrays."""
+        try:
+            import torch
+            if not isinstance(arr, torch.Tensor):
+                return torch.from_numpy(np.ascontiguousarray(arr))
+            return arr
+        except ImportError:
+            # torch should always be available in ComfyUI, but keep the
+            # numpy fallback for any stand-alone / test environments.
+            return arr
 
     def _pick_local_model_path(self, glb_path, model_3d, glb_input, obj_input):
         """Choose the first usable on-disk model path for the local renderer."""
