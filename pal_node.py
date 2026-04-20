@@ -74,10 +74,14 @@ class PALNode:
         render_width = min(max(render_width, 64), 2048)
         render_height = min(max(render_height, 64), 2048)
 
+        # Diagnostic: how much state did execute() actually receive from the queue?
+        _state_len = len(_pal_scene_state) if isinstance(_pal_scene_state, str) else 0
+        logger.warning(f"[PAL Node] execute() called — _pal_scene_state length={_state_len}")
         try:
             state = json.loads(_pal_scene_state) if _pal_scene_state else {}
         except json.JSONDecodeError:
             state = {}
+        logger.warning(f"[PAL Node] state keys={list(state.keys())}, beauty_b64 present={'beauty_b64' in state and bool(state['beauty_b64'])}")
 
         # Merge inputs + resolve plan
         lc_data = {}
