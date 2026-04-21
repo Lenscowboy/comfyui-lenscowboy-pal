@@ -78,6 +78,10 @@ All inputs are optional.
 | `render_width` / `render_height` | INT | Render resolution (64–2048) |
 | `scene_json_in` | STRING | Scene state from another PAL node |
 | `use_local_renderer` | BOOLEAN | When true, render via pygfx instead of iframe |
+| `_pal_scene_state` | STRING (optional, multiline) | Scene state carrier — hidden widget, round-trips render passes + keyframes + camera + settings |
+
+### Notes on state carrier
+Declared `optional` (not `hidden`) so ComfyUI's queue serializer actually forwards the widget value to Python's `execute()`. Frontend finds it by name and collapses to zero draw size. Wholesale replacement of `_palState` on `pal:state` events was wiping previously-captured render passes — the in-modal listener + `_saveAndClose` merge path now preserve the passes, scene, camera, settings, and cameraSystem dicts.
 
 ### Hidden input
 
@@ -90,7 +94,7 @@ All inputs are optional.
 | Output | Type | Purpose |
 |--------|------|---------|
 | `beauty_pass` | IMAGE | Rendered beauty / colour pass |
-| `depth_pass` | IMAGE | Depth pass (single channel) |
+| `depth_pass` | IMAGE | Depth pass (grayscale replicated to RGB for PreviewImage compatibility) |
 | `normal_pass` | IMAGE | Normal map pass (RGB) |
 | `scene_json` | STRING | Scene objects state (positions, rotations, scales) |
 | `camera_json` | STRING | Camera position, rotation, FOV |
@@ -103,14 +107,16 @@ All inputs are optional.
 ## Execution Flow
 
 1. `execute()` runs server-side (Python)
-2. Parses `_pal_scene_state` JSON from the hidden widget
+2. Parses `_pal_scene_state` JSON from the optional widget (declared `optional`, visually collapsed)
 3. If `lc_api_key` provided: fetches project data from LC platform via `pal_api.py`
 4. Resolves model inputs via `_resolve_models()` — reads files, accepts base64 from upstream, detects format from extension for `model_3d`
 5. Merges LC data + ComfyUI inputs via `PALInputResolver`
 6. **Render branch:**
-   - `use_local_renderer=True`: picks first on-disk model path, reads camera from state, calls `pal_renderer.render_model()` → numpy arrays. Falls back to iframe decode on any exception.
-   - `use_local_renderer=False` (default): decodes base64 passes from state (legacy iframe path)
-7. Returns 10 outputs
+   - `use_local_renderer=True`: picks first on-disk model path, reads camera from state, calls `pal_renderer.render_model()` → numpy arrays (wrapped as torch tensors for output). Falls back to iframe decode on any exception.
+   - `use_local_renderer=False` (default): decodes base64 passes from state (iframe path).
+7. **Output typing:** every IMAGE output goes through `_to_image_tensor` → `torch.Tensor (1, H, W, 3)` float32 [0, 1]. Depth / alpha grayscale replicated to RGB so PreviewImage / downstream nodes can `.cpu().numpy()` without TypeError.
+8. **Dimension matching:** blank-fallback passes (empty `*_b64` in state) mirror the actual beauty tensor's shape so all 5 outputs align whether real or zero-filled.
+9. Returns 10 outputs (5 images + scene_json + camera_json + frame_start/end + sequence_json).
 
 ## postMessage Bridge
 
@@ -120,18 +126,25 @@ PAL SaaS runs in an iframe. All communication via `window.postMessage`.
 
 | Type | Data | When |
 |------|------|------|
-| `pal:render-request` | — | User clicks "Render All" button |
-| `pal:get-state` | — | User clicks "Save & Close" |
-| `pal:load-models` | `{ models: [{id, name, format, data/path}] }` | After iframe loads, if model inputs connected |
-| `pal:load-state` | `{ state }` | Shot switcher loads breakdown scene data |
-| `pal:set-camera` | `{ camera }` | Shot switcher loads breakdown camera data |
+| `pal:render-request` | — | Programmatic render trigger (legacy — in-iframe Render/Export button is the canonical UX) |
+| `pal:get-state` | — | `_saveAndClose` — awaits `pal:state` reply before destroying the modal |
+| `pal:load-models` | `{ models: [{id, name, format, data/path}] }` | Iframe load — posts in-memory state models + upstream graph-walked models (Load3D etc.) |
+| `pal:load-state` | `{ state: { scene?, settings?, cameraSystem? } }` | Iframe load — restores keyframes + viewport settings + camera system (body/lens/focal/aperture/focus/aspect). **Does NOT include scene.objects** — models come via pal:load-models; re-serializing them would race the async FBX loader and create placeholder tetrahedra. |
+| `pal:set-camera` | `{ camera: { position, rotation?, quaternion?, fov } }` | Iframe load — restores shotCam transform |
 
 ### PAL iframe → ComfyUI
 
 | Type | Data | When |
 |------|------|------|
-| `pal:state` | `{ state: { scene, camera } }` | On state change / save request |
-| `pal:render` | `{ beauty, depth, normals }` (base64) | After render completes |
+| `pal:state` | `{ state: { scene: { objects, keyframes }, camera, settings, cameraSystem } }` | Response to `pal:get-state`. `settings` = localStorage `pal_*` snapshot + `render-resolution` dropdown. `cameraSystem` = `CameraSystem.toJSON()` (body / lens / focal / aperture / focus / extraction aspect). |
+| `pal:render` | `{ beauty, depth, normals, alpha }` (base64) | After Render/Export finishes. Node auto-queues the ComfyUI graph 80ms later so Preview updates in one click. |
+
+### State merge invariants (comfy side)
+
+- `pal:render` handler writes `beauty_b64` / `depth_b64` / `normal_b64` / `alpha_b64` onto `_palState` and flushes the widget immediately.
+- `pal:state` listener (during viewport session) **merges** `scene / camera / settings / cameraSystem` into `_palState` — never replaces. Wholesale replacement was wiping the render passes.
+- `_saveAndClose` awaits the `pal:state` reply before flushing the widget and destroying the iframe. Synchronous close was dropping the response.
+- `beforeQueuePrompt` flushes `_palState` → widget on every Run — backup in case state was changed without a Save & Close round-trip.
 
 ## Model Inputs (GLB/OBJ/FBX/model_3d)
 
