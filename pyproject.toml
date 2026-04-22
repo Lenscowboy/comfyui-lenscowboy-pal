@@ -1,0 +1,17 @@
+[project]
+name = "comfyui-lenscowboy-pal"
+description = "3D previsualisation and spatial layout node for ComfyUI. Beauty, depth, and normal passes from a Three.js viewport."
+version = "1.0.0"
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/Lenscowboy/comfyui-lenscowboy-pal"
+"Bug Tracker" = "https://github.com/Lenscowboy/comfyui-lenscowboy-pal/issues"
+
+[tool.comfy]
+PublisherId = "lenscowboy"
+DisplayName = "PAL Layout Node"
+Icon = ""
