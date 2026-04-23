@@ -672,12 +672,16 @@ app.registerExtension({
           if (s.cameraSystem) this._palState.cameraSystem = s.cameraSystem;
         }
         if (msg.type === "pal:render") {
-          const features = new Set(this._lcSession?.features || [...FREE_FEATURES]);
+          // Do not gate passes client-side. Server-side pal_node.execute()
+          // already blanks depth/normal/alpha for free-tier plans via
+          // has_multipass = plan != "free". A client gate here was
+          // unreliable — _lcSession is async and reads null if the handler
+          // fires before /pal/session resolves, causing spurious upgrade
+          // modals for enterprise users.
           this._palState.beauty_b64 = msg.beauty;
-          // Gate: depth/normal/alpha require multipass feature
-          this._palState.depth_b64  = features.has("multipass") ? (msg.depth   || "") : "";
-          this._palState.normal_b64 = features.has("multipass") ? (msg.normals || "") : "";
-          this._palState.alpha_b64  = features.has("multipass") ? (msg.alpha   || "") : "";
+          this._palState.depth_b64  = msg.depth   || "";
+          this._palState.normal_b64 = msg.normals || "";
+          this._palState.alpha_b64  = msg.alpha   || "";
           this._palRendered = true;
           // Flush to the hidden widget immediately so the queue reads current
           // state even if the user queues without re-entering the modal.
@@ -690,9 +694,6 @@ app.registerExtension({
             console.warn(`[PAL comfy] pal:render — _pal_scene_state widget not found; widgets=`, this.widgets?.map(w => w.name));
           }
           this._updateSummary();
-          if (!features.has("multipass") && (msg.depth || msg.normals)) {
-            this._lcShowUpgradeModal("Depth / Normal passes", "COMFY PAL");
-          }
           // Auto-queue the ComfyUI graph so the rendered beauty shows up
           // in downstream Preview / Video Combine nodes immediately —
           // user's expected flow is "press Render → see result", not
