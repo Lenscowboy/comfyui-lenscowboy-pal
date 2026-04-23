@@ -25,10 +25,10 @@ class PALNode:
     CATEGORY = "LensCowboy/Layout"
     RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", "IMAGE", "IMAGE", "STRING", "STRING", "INT", "INT", "STRING")
     RETURN_NAMES = (
-        "beauty_pass", "depth_pass", "normal_pass", "alpha_pass", "id_matte_pass",
-        "scene_json", "camera_json",
-        "frame_start", "frame_end",
-        "sequence_json",
+        "beauty pass", "alpha pass", "depth pass", "normal pass", "id matte pass",
+        "scene json", "camera json",
+        "frame start", "frame end",
+        "sequence json",
     )
     FUNCTION = "execute"
 
@@ -190,7 +190,7 @@ class PALNode:
         if state.get("sequence"):
             sequence_json = json.dumps(state["sequence"])
 
-        return (beauty, depth, normals, alpha, id_matte,
+        return (beauty, alpha, depth, normals, id_matte,
                 scene_json, camera_json,
                 resolved.get("frame_start", frame_start),
                 resolved.get("frame_end", frame_end),
