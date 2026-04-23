@@ -145,10 +145,17 @@ app.registerExtension({
         multiline: false,
       });
 
-      // Phase 2 — check connection on creation if api_key already set
+      // Phase 2 — check connection on creation if api_key already set,
+      // AND re-check whenever the user edits the api_key widget so pasting
+      // a key after node creation populates _lcSession / features correctly.
       const apiKeyWidget = this.widgets?.find(w => w.name === "lc_api_key");
-      if (apiKeyWidget?.value) {
-        this._lcCheckSession(apiKeyWidget.value);
+      if (apiKeyWidget) {
+        if (apiKeyWidget.value) this._lcCheckSession(apiKeyWidget.value);
+        const prevCallback = apiKeyWidget.callback;
+        apiKeyWidget.callback = (value) => {
+          if (typeof prevCallback === "function") prevCallback(value);
+          this._lcCheckSession(value || "");
+        };
       }
     };
 
@@ -594,6 +601,13 @@ app.registerExtension({
       const apiKeyWidget = this.widgets?.find(w => w.name === "lc_api_key");
       const projectWidget = this.widgets?.find(w => w.name === "lc_project_id");
       const palToken = apiKeyWidget?.value || "";
+
+      // Defensive: if the user pasted an api_key but the session never loaded
+      // (widget callback race, offline, etc.), kick off a session check now so
+      // pal:render handlers gate on accurate plan features instead of FREE_FEATURES.
+      if (palToken && !this._lcSession) {
+        this._lcCheckSession(palToken);
+      }
 
       // ── Iframe mode: full PAL SaaS UI ──────────────────
       // comfy=1 ensures viewport loads even without auth (free tier)
