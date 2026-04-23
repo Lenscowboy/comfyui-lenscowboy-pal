@@ -161,35 +161,16 @@ app.registerExtension({
         }
       }
 
-      // Open Viewport button — DOM widget with amber fill so the new frontend
-      // actually renders the styled version (canvas widget.draw is ignored).
-      if (typeof this.addDOMWidget === "function") {
-        const btnEl = document.createElement("button");
-        btnEl.type = "button";
-        btnEl.textContent = "OPEN VIEWPORT";
-        btnEl.style.cssText =
-          "width:100%;height:72px;padding:0 14px;background:#e8a020;color:#000;" +
-          "border:1px solid #8a5d10;border-radius:6px;cursor:pointer;" +
-          "font:bold 30px 'Space Mono',Consolas,monospace;letter-spacing:0.1em;" +
-          "text-transform:uppercase;box-sizing:border-box;";
-        btnEl.onmouseenter = () => { btnEl.style.background = "#f0b030"; };
-        btnEl.onmouseleave = () => { btnEl.style.background = "#e8a020"; };
-        btnEl.onmousedown = () => { btnEl.style.background = "#c88a10"; };
-        btnEl.onmouseup = () => { btnEl.style.background = "#f0b030"; };
-        btnEl.addEventListener("click", () => this._openViewport());
-        const btnWidget = this.addDOMWidget("open_viewport_btn", "div", btnEl, {
-          serialize: false,
-          hideOnZoom: false,
-          getHeight: () => 82,
-        });
-        if (btnWidget) btnWidget.computeSize = () => [0, 82];
-      } else {
-        // Fallback to classic LiteGraph button for older frontends
-        const btn = this.addWidget("button", "OPEN VIEWPORT", "open_viewport", () => {
-          this._openViewport();
-        });
-        btn.serialize = false;
-      }
+      // Open Viewport button — classic LiteGraph button. The new Vue
+      // frontend captures pointer events on the canvas layer, so DOM
+      // buttons added via addDOMWidget render but don't receive clicks.
+      // The LiteGraph button path is the only reliable click handler.
+      // Visual styling can't be customised (canvas draw hooks are no-ops
+      // on the new frontend), but functionality is guaranteed.
+      const btn = this.addWidget("button", "OPEN VIEWPORT", "open_viewport", () => {
+        this._openViewport();
+      });
+      btn.serialize = false;
 
       // Scene summary widget (read-only text)
       this._summaryWidget = this.addWidget("text", "scene_summary", "No scene loaded", () => {}, {
