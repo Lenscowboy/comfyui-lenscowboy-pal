@@ -307,6 +307,18 @@ app.registerExtension({
       });
       btn.serialize = false;
 
+      // ── Manual texture upload ─────────────────────────────────
+      // Fallback for models whose textures aren't reachable by auto-harvest
+      // (FBX with external refs, Load 3D extras stored outside /input/3d/,
+      // UDIM-style tile sets that end up misnamed, etc.). Opens a top-level
+      // file picker — works reliably because it runs in ComfyUI's main
+      // window, not the cross-origin iframe that blocks showDirectoryPicker.
+      this._userTextures = [];
+      this._texBtn = this.addWidget("button", "UPLOAD TEXTURES (0)", "upload_textures", () => {
+        this._pickTextures();
+      });
+      this._texBtn.serialize = false;
+
       // Scene summary widget (read-only text)
       this._summaryWidget = this.addWidget("text", "scene_summary", "No scene loaded", () => {}, {
         serialize: false,
@@ -389,6 +401,43 @@ app.registerExtension({
       } catch (_) {
         return [];
       }
+    };
+
+    /* ── Manual texture upload picker ─────────────────────────── */
+    nodeType.prototype._pickTextures = function () {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.multiple = true;
+      input.accept = "image/*,.mtl";
+      input.style.display = "none";
+      document.body.appendChild(input);
+      input.addEventListener("change", async () => {
+        const files = Array.from(input.files || []);
+        if (!files.length) { input.remove(); return; }
+        const readers = files.map((f) => new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            // Strip data URL prefix to get pure base64.
+            const result = typeof reader.result === "string" ? reader.result : "";
+            const comma = result.indexOf(",");
+            const b64 = comma >= 0 ? result.slice(comma + 1) : result;
+            resolve({ name: f.name, mime: f.type || "application/octet-stream", data: b64 });
+          };
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(f);
+        }));
+        const uploaded = (await Promise.all(readers)).filter(Boolean);
+        // De-dupe by filename: newer uploads replace older ones of the same name.
+        const byName = new Map(this._userTextures.map((r) => [r.name, r]));
+        for (const u of uploaded) byName.set(u.name, u);
+        this._userTextures = [...byName.values()];
+        if (this._texBtn) {
+          this._texBtn.name = `UPLOAD TEXTURES (${this._userTextures.length})`;
+        }
+        console.log(`[PAL comfy] User textures now: ${this._userTextures.length}`);
+        input.remove();
+      });
+      input.click();
     };
 
     /* ── Phase 3: fetch breakdown data for a shot ─────────────── */
@@ -872,6 +921,18 @@ app.registerExtension({
         const upstreamModels = await _collectUpstreamModels(this);
         const models = [...stateModels, ...upstreamModels];
         if (glbPath) models.push({ id: "glb_path", name: glbPath.split("/").pop(), format: "glb", path: glbPath });
+
+        // Merge user-uploaded textures into every model's resources so the
+        // viewport's LoadingManager can resolve texture URIs against them.
+        // De-duped by filename — user uploads take precedence over auto-harvest.
+        if (this._userTextures?.length) {
+          for (const m of models) {
+            const existing = new Map((m.resources || []).map((r) => [r.name, r]));
+            for (const u of this._userTextures) existing.set(u.name, u);
+            m.resources = [...existing.values()];
+          }
+          console.log(`[PAL comfy] Merged ${this._userTextures.length} user textures into ${models.length} model(s)`);
+        }
 
         const savedScene = this._palState?.scene;
         const savedCamera = this._palState?.camera;
