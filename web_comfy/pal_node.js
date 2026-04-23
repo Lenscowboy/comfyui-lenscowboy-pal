@@ -133,11 +133,35 @@ app.registerExtension({
         }
       }
 
-      // Add Open Viewport button widget
-      const btn = this.addWidget("button", "Open Viewport", "open_viewport", () => {
+      // Add Open Viewport button widget — styled with LensCowboy amber fill
+      const btn = this.addWidget("button", "OPEN VIEWPORT", "open_viewport", () => {
         this._openViewport();
       });
       btn.serialize = false;
+      // Custom draw: amber gradient fill + black uppercase mono label, matches
+      // the PAL docs aesthetic (--accent #e8a020, Space Mono 11px).
+      btn.draw = function (ctx, node, widget_width, y, H) {
+        const margin = 15;
+        const x = margin;
+        const w = widget_width - margin * 2;
+        // Fill
+        ctx.fillStyle = "#e8a020";
+        ctx.beginPath();
+        if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, H, 4);
+        else ctx.rect(x, y, w, H);
+        ctx.fill();
+        // Subtle dark hairline stroke
+        ctx.strokeStyle = "#8a5d10";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        // Label
+        ctx.fillStyle = "#000";
+        ctx.font = "bold 11px 'Space Mono', 'Consolas', monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const label = (this.name || "OPEN VIEWPORT").toString().toUpperCase();
+        ctx.fillText(label, x + w / 2, y + H / 2);
+      };
 
       // Scene summary widget (read-only text)
       this._summaryWidget = this.addWidget("text", "scene_summary", "No scene loaded", () => {}, {
@@ -157,6 +181,33 @@ app.registerExtension({
           this._lcCheckSession(value || "");
         };
       }
+    };
+
+    /* ── Branding overlay ─────────────────────────────────────────── */
+    // Paints "LENSCOWBOY · PAL" in amber mono at the bottom-right of the node
+    // body, matching the docs aesthetic (Space Mono 10px uppercase, 0.18em
+    // letter-spacing, colour --accent #e8a020). onDrawForeground runs after
+    // all widgets so the text sits over the node surface without conflict.
+    const prevDrawForeground = nodeType.prototype.onDrawForeground;
+    nodeType.prototype.onDrawForeground = function (ctx) {
+      if (typeof prevDrawForeground === "function") prevDrawForeground.call(this, ctx);
+      if (this.flags?.collapsed) return;
+      const [w, h] = this.size;
+      ctx.save();
+      ctx.font = "bold 9px 'Space Mono', 'Consolas', monospace";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.fillStyle = "rgba(232, 160, 32, 0.85)";
+      // Simulate letter-spacing by writing one letter at a time.
+      const label = "LENSCOWBOY · PAL";
+      const spacing = 1.4;
+      let x = w - 10;
+      for (let i = label.length - 1; i >= 0; i--) {
+        const ch = label[i];
+        ctx.fillText(ch, x, h - 8);
+        x -= ctx.measureText(ch).width + spacing;
+      }
+      ctx.restore();
     };
 
     /* ── Phase 2: session validation ─────────────────────────────── */
