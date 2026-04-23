@@ -133,35 +133,53 @@ app.registerExtension({
         }
       }
 
-      // Add Open Viewport button widget — styled with LensCowboy amber fill
-      const btn = this.addWidget("button", "OPEN VIEWPORT", "open_viewport", () => {
-        this._openViewport();
-      });
-      btn.serialize = false;
-      // Custom draw: amber gradient fill + black uppercase mono label, matches
-      // the PAL docs aesthetic (--accent #e8a020, Space Mono 11px).
-      btn.draw = function (ctx, node, widget_width, y, H) {
-        const margin = 15;
-        const x = margin;
-        const w = widget_width - margin * 2;
-        // Fill
-        ctx.fillStyle = "#e8a020";
-        ctx.beginPath();
-        if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, H, 4);
-        else ctx.rect(x, y, w, H);
-        ctx.fill();
-        // Subtle dark hairline stroke
-        ctx.strokeStyle = "#8a5d10";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        // Label
-        ctx.fillStyle = "#000";
-        ctx.font = "bold 11px 'Space Mono', 'Consolas', monospace";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        const label = (this.name || "OPEN VIEWPORT").toString().toUpperCase();
-        ctx.fillText(label, x + w / 2, y + H / 2);
-      };
+      // LensCowboy branding strip — DOM widget, amber mono, top of node body.
+      // Canvas-based onDrawForeground hooks are no-ops on the new Vue frontend,
+      // so branding/button styling must be done via DOM widgets.
+      if (typeof this.addDOMWidget === "function") {
+        const brandEl = document.createElement("div");
+        brandEl.textContent = "LENSCOWBOY · PAL";
+        brandEl.style.cssText =
+          "text-align:right;font:bold 10px 'Space Mono',Consolas,monospace;" +
+          "letter-spacing:0.2em;color:#e8a020;padding:2px 10px 6px;" +
+          "text-transform:uppercase;opacity:0.9;pointer-events:none;";
+        const brandWidget = this.addDOMWidget("lc_brand", "div", brandEl, {
+          serialize: false,
+          hideOnZoom: false,
+          getHeight: () => 18,
+        });
+        if (brandWidget) brandWidget.computeSize = () => [0, 18];
+      }
+
+      // Open Viewport button — DOM widget with amber fill so the new frontend
+      // actually renders the styled version (canvas widget.draw is ignored).
+      if (typeof this.addDOMWidget === "function") {
+        const btnEl = document.createElement("button");
+        btnEl.type = "button";
+        btnEl.textContent = "OPEN VIEWPORT";
+        btnEl.style.cssText =
+          "width:100%;height:32px;padding:0 12px;background:#e8a020;color:#000;" +
+          "border:1px solid #8a5d10;border-radius:4px;cursor:pointer;" +
+          "font:bold 11px 'Space Mono',Consolas,monospace;letter-spacing:0.08em;" +
+          "text-transform:uppercase;box-sizing:border-box;";
+        btnEl.onmouseenter = () => { btnEl.style.background = "#f0b030"; };
+        btnEl.onmouseleave = () => { btnEl.style.background = "#e8a020"; };
+        btnEl.onmousedown = () => { btnEl.style.background = "#c88a10"; };
+        btnEl.onmouseup = () => { btnEl.style.background = "#f0b030"; };
+        btnEl.addEventListener("click", () => this._openViewport());
+        const btnWidget = this.addDOMWidget("open_viewport_btn", "div", btnEl, {
+          serialize: false,
+          hideOnZoom: false,
+          getHeight: () => 38,
+        });
+        if (btnWidget) btnWidget.computeSize = () => [0, 38];
+      } else {
+        // Fallback to classic LiteGraph button for older frontends
+        const btn = this.addWidget("button", "OPEN VIEWPORT", "open_viewport", () => {
+          this._openViewport();
+        });
+        btn.serialize = false;
+      }
 
       // Scene summary widget (read-only text)
       this._summaryWidget = this.addWidget("text", "scene_summary", "No scene loaded", () => {}, {
@@ -181,33 +199,6 @@ app.registerExtension({
           this._lcCheckSession(value || "");
         };
       }
-    };
-
-    /* ── Branding overlay ─────────────────────────────────────────── */
-    // Paints "LENSCOWBOY · PAL" in amber mono at the bottom-right of the node
-    // body, matching the docs aesthetic (Space Mono 10px uppercase, 0.18em
-    // letter-spacing, colour --accent #e8a020). onDrawForeground runs after
-    // all widgets so the text sits over the node surface without conflict.
-    const prevDrawForeground = nodeType.prototype.onDrawForeground;
-    nodeType.prototype.onDrawForeground = function (ctx) {
-      if (typeof prevDrawForeground === "function") prevDrawForeground.call(this, ctx);
-      if (this.flags?.collapsed) return;
-      const [w, h] = this.size;
-      ctx.save();
-      ctx.font = "bold 9px 'Space Mono', 'Consolas', monospace";
-      ctx.textAlign = "right";
-      ctx.textBaseline = "bottom";
-      ctx.fillStyle = "rgba(232, 160, 32, 0.85)";
-      // Simulate letter-spacing by writing one letter at a time.
-      const label = "LENSCOWBOY · PAL";
-      const spacing = 1.4;
-      let x = w - 10;
-      for (let i = label.length - 1; i >= 0; i--) {
-        const ch = label[i];
-        ctx.fillText(ch, x, h - 8);
-        x -= ctx.measureText(ch).width + spacing;
-      }
-      ctx.restore();
     };
 
     /* ── Phase 2: session validation ─────────────────────────────── */
