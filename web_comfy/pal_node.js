@@ -135,9 +135,10 @@ app.registerExtension({
 
       // LensCowboy branding strip — DOM widget, amber mono.
       // Canvas-based onDrawForeground hooks are no-ops on the new Vue frontend,
-      // so branding/button styling must be done via DOM widgets. Widget is
-      // spliced to the front of this.widgets so it renders at the TOP of the
-      // node body, above the input widgets.
+      // so branding styling must be done via DOM widgets. DO NOT splice
+      // widgets[] to reorder — ComfyUI maps widget values positionally and
+      // reordering corrupts render_width/height/_pal_scene_state/etc. The
+      // brand appends naturally at the end of the widgets list.
       if (typeof this.addDOMWidget === "function") {
         const brandEl = document.createElement("div");
         brandEl.textContent = "LENSCOWBOY · PAL";
@@ -150,15 +151,7 @@ app.registerExtension({
           hideOnZoom: false,
           getHeight: () => 60,
         });
-        if (brandWidget) {
-          brandWidget.computeSize = () => [0, 60];
-          // Move brand to top of widgets[] so it renders first on the node.
-          const idx = this.widgets.indexOf(brandWidget);
-          if (idx > 0) {
-            this.widgets.splice(idx, 1);
-            this.widgets.unshift(brandWidget);
-          }
-        }
+        if (brandWidget) brandWidget.computeSize = () => [0, 60];
       }
 
       // Open Viewport button — classic LiteGraph button. The new Vue
