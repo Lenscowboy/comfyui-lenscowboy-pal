@@ -3,6 +3,8 @@
 # even when the renderer isn't available (graceful fallback to iframe).
 pygfx>=0.7
 rendercanvas>=2.0
+gltflib>=1.0
 trimesh>=4.0
+assimp-py>=1.0
 imageio>=2.34
 numpy>=1.24
