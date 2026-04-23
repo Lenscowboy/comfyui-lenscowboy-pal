@@ -100,7 +100,21 @@ app.registerExtension({
     nodeType.prototype.onNodeCreated = function () {
       origOnCreated?.apply(this, arguments);
       this._palRendered = false;
+      // Hydrate _palState from the persisted _pal_scene_state widget so
+      // keyframes/cameraSystem/settings survive close→reopen and workflow
+      // save/load. Without this, the widget holds the JSON but the in-memory
+      // state resets to {}, and the reopen path sends an empty load-state
+      // message to the iframe, dropping keyframes.
       this._palState = {};
+      const savedBlob = this.widgets?.find(w => w.name === "_pal_scene_state")?.value;
+      if (savedBlob && typeof savedBlob === "string" && savedBlob.length > 2) {
+        try {
+          const parsed = JSON.parse(savedBlob);
+          if (parsed && typeof parsed === "object") this._palState = parsed;
+        } catch (err) {
+          console.warn("[PAL comfy] failed to parse saved _pal_scene_state — starting fresh", err);
+        }
+      }
 
       // Phase 2 session cache
       this._lcSession = null;          // { plan, features, project_list }
