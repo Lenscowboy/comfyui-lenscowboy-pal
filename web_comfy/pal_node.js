@@ -133,22 +133,32 @@ app.registerExtension({
         }
       }
 
-      // LensCowboy branding strip — DOM widget, amber mono, top of node body.
+      // LensCowboy branding strip — DOM widget, amber mono.
       // Canvas-based onDrawForeground hooks are no-ops on the new Vue frontend,
-      // so branding/button styling must be done via DOM widgets.
+      // so branding/button styling must be done via DOM widgets. Widget is
+      // spliced to the front of this.widgets so it renders at the TOP of the
+      // node body, above the input widgets.
       if (typeof this.addDOMWidget === "function") {
         const brandEl = document.createElement("div");
         brandEl.textContent = "LENSCOWBOY · PAL";
         brandEl.style.cssText =
-          "text-align:right;font:bold 10px 'Space Mono',Consolas,monospace;" +
-          "letter-spacing:0.2em;color:#e8a020;padding:2px 10px 6px;" +
-          "text-transform:uppercase;opacity:0.9;pointer-events:none;";
+          "text-align:center;font:bold 14px 'Space Mono',Consolas,monospace;" +
+          "letter-spacing:0.22em;color:#e8a020;padding:8px 10px 6px;" +
+          "text-transform:uppercase;pointer-events:none;";
         const brandWidget = this.addDOMWidget("lc_brand", "div", brandEl, {
           serialize: false,
           hideOnZoom: false,
-          getHeight: () => 18,
+          getHeight: () => 32,
         });
-        if (brandWidget) brandWidget.computeSize = () => [0, 18];
+        if (brandWidget) {
+          brandWidget.computeSize = () => [0, 32];
+          // Move brand to top of widgets[] so it renders first on the node.
+          const idx = this.widgets.indexOf(brandWidget);
+          if (idx > 0) {
+            this.widgets.splice(idx, 1);
+            this.widgets.unshift(brandWidget);
+          }
+        }
       }
 
       // Open Viewport button — DOM widget with amber fill so the new frontend
@@ -158,9 +168,9 @@ app.registerExtension({
         btnEl.type = "button";
         btnEl.textContent = "OPEN VIEWPORT";
         btnEl.style.cssText =
-          "width:100%;height:32px;padding:0 12px;background:#e8a020;color:#000;" +
+          "width:100%;height:42px;padding:0 12px;background:#e8a020;color:#000;" +
           "border:1px solid #8a5d10;border-radius:4px;cursor:pointer;" +
-          "font:bold 11px 'Space Mono',Consolas,monospace;letter-spacing:0.08em;" +
+          "font:bold 15px 'Space Mono',Consolas,monospace;letter-spacing:0.1em;" +
           "text-transform:uppercase;box-sizing:border-box;";
         btnEl.onmouseenter = () => { btnEl.style.background = "#f0b030"; };
         btnEl.onmouseleave = () => { btnEl.style.background = "#e8a020"; };
@@ -170,9 +180,9 @@ app.registerExtension({
         const btnWidget = this.addDOMWidget("open_viewport_btn", "div", btnEl, {
           serialize: false,
           hideOnZoom: false,
-          getHeight: () => 38,
+          getHeight: () => 48,
         });
-        if (btnWidget) btnWidget.computeSize = () => [0, 38];
+        if (btnWidget) btnWidget.computeSize = () => [0, 48];
       } else {
         // Fallback to classic LiteGraph button for older frontends
         const btn = this.addWidget("button", "OPEN VIEWPORT", "open_viewport", () => {
