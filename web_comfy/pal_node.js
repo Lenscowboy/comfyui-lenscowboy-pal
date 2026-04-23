@@ -653,6 +653,11 @@ app.registerExtension({
       const iframe = document.createElement("iframe");
       iframe.src = palUrl;
       iframe.style.cssText = "width:100%;height:100%;border:none;";
+      // Permissions so the viewport can use File System Access API
+      // (Mount Local → pick a folder of .glb/.gltf + textures from disk),
+      // clipboard for copy-paste flows, and fullscreen.
+      iframe.setAttribute("allow", "fullscreen; clipboard-read; clipboard-write");
+      iframe.allowFullscreen = true;
       container.appendChild(iframe);
 
       // Listen for postMessage from PAL iframe
