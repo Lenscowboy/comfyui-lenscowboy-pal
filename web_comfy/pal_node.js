@@ -142,16 +142,16 @@ app.registerExtension({
         const brandEl = document.createElement("div");
         brandEl.textContent = "LENSCOWBOY · PAL";
         brandEl.style.cssText =
-          "text-align:center;font:bold 14px 'Space Mono',Consolas,monospace;" +
-          "letter-spacing:0.22em;color:#e8a020;padding:8px 10px 6px;" +
+          "text-align:center;font:bold 28px 'Space Mono',Consolas,monospace;" +
+          "letter-spacing:0.22em;color:#e8a020;padding:14px 10px 10px;" +
           "text-transform:uppercase;pointer-events:none;";
         const brandWidget = this.addDOMWidget("lc_brand", "div", brandEl, {
           serialize: false,
           hideOnZoom: false,
-          getHeight: () => 32,
+          getHeight: () => 60,
         });
         if (brandWidget) {
-          brandWidget.computeSize = () => [0, 32];
+          brandWidget.computeSize = () => [0, 60];
           // Move brand to top of widgets[] so it renders first on the node.
           const idx = this.widgets.indexOf(brandWidget);
           if (idx > 0) {
@@ -168,9 +168,9 @@ app.registerExtension({
         btnEl.type = "button";
         btnEl.textContent = "OPEN VIEWPORT";
         btnEl.style.cssText =
-          "width:100%;height:42px;padding:0 12px;background:#e8a020;color:#000;" +
-          "border:1px solid #8a5d10;border-radius:4px;cursor:pointer;" +
-          "font:bold 15px 'Space Mono',Consolas,monospace;letter-spacing:0.1em;" +
+          "width:100%;height:72px;padding:0 14px;background:#e8a020;color:#000;" +
+          "border:1px solid #8a5d10;border-radius:6px;cursor:pointer;" +
+          "font:bold 30px 'Space Mono',Consolas,monospace;letter-spacing:0.1em;" +
           "text-transform:uppercase;box-sizing:border-box;";
         btnEl.onmouseenter = () => { btnEl.style.background = "#f0b030"; };
         btnEl.onmouseleave = () => { btnEl.style.background = "#e8a020"; };
@@ -180,9 +180,9 @@ app.registerExtension({
         const btnWidget = this.addDOMWidget("open_viewport_btn", "div", btnEl, {
           serialize: false,
           hideOnZoom: false,
-          getHeight: () => 48,
+          getHeight: () => 82,
         });
-        if (btnWidget) btnWidget.computeSize = () => [0, 48];
+        if (btnWidget) btnWidget.computeSize = () => [0, 82];
       } else {
         // Fallback to classic LiteGraph button for older frontends
         const btn = this.addWidget("button", "OPEN VIEWPORT", "open_viewport", () => {
