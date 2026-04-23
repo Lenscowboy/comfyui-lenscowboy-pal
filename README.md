@@ -28,6 +28,15 @@ Connect with a LensCowboy API key to unlock:
 
 No API key needed for local use — the node is a fully capable standalone tool.
 
+### Get an API Key
+
+1. Log into [app.lenscowboy.com/settings](https://app.lenscowboy.com/settings)
+2. Open the **Comfy API Keys** tab
+3. Click **+ Generate New Key** (optionally label it, e.g. `home-pc`)
+4. Copy it and paste into the PAL node's `lc_api_key` field
+
+Features unlock based on your subscription plan. If you downgrade, existing keys automatically lose the dropped features — no remint required. Up to 5 keys per account; revoke any of them from the same page.
+
 ## Install
 
 ### ComfyUI Manager

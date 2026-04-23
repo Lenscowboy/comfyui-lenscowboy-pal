@@ -186,6 +186,20 @@ LC frame_end        →  frame_end       →  24
 
 `imported_models` always passes through (not overridden by LC data).
 
+## API Key — `lc_api_key` input
+
+Paid-tier users generate a long-lived JWT at [app.lenscowboy.com/settings](https://app.lenscowboy.com/settings) → **Comfy API Keys** tab, then paste into the node's `lc_api_key` field.
+
+Token properties (JWT claims):
+- `kind: "comfy"` — distinguishes these from sheet/session tokens
+- `jti` — UUID used for revocation (Firestore doc at `tenants/{id}/comfy_tokens/{jti}`)
+- `plan` — baked at mint time, but downgraded to current tenant plan at decode time
+- `exp` — 365 days from mint
+
+Revocation: user deletes the key in Settings → Firestore doc removed → next auth call on the SaaS side (within ~60s due to in-process cache TTL) returns 401. No client-side handling beyond showing the 401 to the user.
+
+No API key → node runs in free tier (24h anonymous JWT auto-minted via `?comfy=1`). Viewport + beauty ≤512 only.
+
 ## Plans & Pricing
 
 ComfyUI users are 3D artists, not necessarily full LensCowboy SaaS subscribers. The node supports four plan states, resolved from the API key JWT (`plan` claim). No key = free tier (anonymous 24h JWT auto-injected via `comfy=1` param).
