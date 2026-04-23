@@ -299,11 +299,63 @@ const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
 if (widget) widget.value = stateJson;
 ```
 
+**Critical: hydrate `_palState` from the widget in `onNodeCreated`.** The widget's JSON survives workflow save/load and node re-creation, but `_palState` resets to `{}` on every node instance. Without hydration, keyframes/settings/cameraSystem evaporate on viewport reopen because the reopen-load handler reads `_palState.scene.keyframes` and finds nothing.
+
+```javascript
+this._palState = {};
+const saved = this.widgets?.find(w => w.name === "_pal_scene_state")?.value;
+if (saved && saved.length > 2) {
+  try { this._palState = JSON.parse(saved); } catch {}
+}
+```
+
+**Critical: declare `_pal_scene_state` as single-line STRING, NOT `multiline: True`.** Multiline STRINGs render as a DOM textarea on the Vue frontend; LiteGraph's `widget.hidden = true` / `computeSize = () => [0, -4]` tricks don't hide DOM textareas. User sees a huge JSON blob on the node. Single-line STRING renders as a LiteGraph widget we CAN collapse.
+
 ### Max base64 size guard
 `MAX_BASE64_BYTES = 15_000_000` — iframe-delivered passes larger than ~15MB are replaced with blank images to prevent memory issues. Local renderer has no such cap.
 
 ### SaaS shadowing, not branching
 The iframe is the SaaS PAL UI. Do not fork SaaS features for comfy — reuse. Acceptable SaaS edits: hide/tweak controls when `_palComfyMode=true`, extend the existing comfy-only `pal:load-models` handler. Forbidden: parallel loader code paths, comfy-only duplicates of existing SaaS components.
+
+### Vue frontend quirks (Templates v0.9.59+)
+
+The modern ComfyUI frontend broke several LiteGraph patterns that worked fine in the classic frontend. What works and what doesn't:
+
+| Pattern | Works? | Notes |
+|---|---|---|
+| `addWidget("button", ...)` click handler | ✓ | Reliable. Use this for any button that needs to respond to clicks. |
+| `addDOMWidget(name, "div", el, opts)` — display | ✓ | Renders HTML inside the node body. Good for brand strips, status displays, passive UI. |
+| `addDOMWidget` — click handling | ✗ | Canvas intercepts pointer events. Cursor becomes crosshair over the element; click never fires. Use the classic button widget + trigger DOM work from its callback. |
+| `widget.draw = ...` (canvas override) | ✗ | No-op. The Vue frontend skips LiteGraph canvas widget draw for certain widget types. Amber button styling tried via this path is ignored. |
+| `nodeType.prototype.onDrawForeground = ...` | ✗ | No-op for the same reason. Canvas brand overlays don't paint. |
+| `this.widgets.splice(idx, 1); this.widgets.unshift(w)` | ☠ | Reorders the positional widget array. ComfyUI maps widget values to INPUT_TYPES by position, so splicing corrupts every optional input — `render_width` gets `api_key`'s empty string, `_pal_scene_state` shifts too, session + keyframes silently break. **Never splice widgets.** Accept whatever order `addWidget` / `addDOMWidget` gives. |
+| Multiline STRING widget hidden via `hidden=true` | ✗ | DOM textarea ignores LiteGraph flags. Declare as single-line STRING if you want to hide it. |
+| File picker inside iframe (`showDirectoryPicker`) | ✗ | Cross-origin iframe SecurityError. Put file pickers on the top-level ComfyUI node side (`<input type="file">`), send results to iframe via postMessage. |
+
+### Texture harvest + manual upload
+
+`pal_node.js` collects upstream models in `_collectUpstreamModels()` (runs in the top-level ComfyUI window, reaches `127.0.0.1:8188/view`). For glTF and OBJ models, it also harvests sidecar textures:
+
+- **glTF**: parses the JSON, collects `images[].uri` + `buffers[].uri`, fetches each via `/view?type=input&subfolder=<same>&filename=<uri>`, base64-encodes, attaches as `model.resources: [{name, data, mime}]`.
+- **OBJ**: scans the geometry for `mtllib <file>.mtl`, fetches that, parses `map_Kd / map_Bump / map_Ks / norm / disp / decal / refl` for texture filenames, fetches each.
+- **GLB**: no action — textures embedded in the binary. Three.js GLTFLoader handles them.
+- **FBX**: no auto-harvest (binary format, texture refs vary wildly). Users manually upload via the **UPLOAD TEXTURES** button — a classic LiteGraph button widget that opens a top-level `<input type="file" multiple>` picker; selected files are base64-encoded and stored on `node._userTextures`, merged into every model's resources at viewport-open time.
+
+**Iframe-side consumer** (in `pal/web/index.html` `pal:load-models` handler): `_buildResourceMap(model.resources)` turns each resource into a blob URL; `_makeManager(urlMap)` builds a `THREE.LoadingManager` with a URL modifier that maps texture URIs to those blobs. Case-insensitive filename-leaf matching handles mixed case, backslash paths from FBX-embedded Windows refs, and URL-percent-encoded names. Warns `[PAL comfy] URL modifier: no match for ...` when it can't find a match — useful debugging signal.
+
+### Server is source of truth for plan gates
+
+Client-side UI gates exist for UX (show lock icons, suppress obviously-invalid choices) but are NOT load-bearing. The actual enforcement is:
+- `app/pal_comfy.py::execute()` on the SaaS side reads `plan` from `/pal/session` and blanks depth/normal/alpha for `plan == "free"`.
+- Any client-side multipass-gate upgrade modal was removed from the `pal:render` handler — it was racing against the async `/pal/session` call and showed "Free tier" errors to enterprise users during that window.
+
+### CORS required for the node's cross-origin calls
+
+`pal_node.js::_lcCheckSession` POSTs to `app.lenscowboy.com/pal/session` from ComfyUI's origin (`127.0.0.1:8188`). SaaS's `app/main.py` needs `CORSMiddleware` with `allow_origins=["*"]`, `allow_credentials=False` (Bearer-token auth, no cookies). Without it the preflight fails, `_lcSession` stays null, and every client-side feature check falls back to FREE_FEATURES.
+
+### Session refresh on api_key paste
+
+`_lcCheckSession` needs to run whenever the `lc_api_key` widget changes value — not just on node creation. Otherwise pasting the key after dropping the node leaves `_lcSession = null` and features resolve to free tier. Pattern: wrap the widget's `callback` to invoke `_lcCheckSession(value)`, plus a defensive refresh in `_openViewport` if the token is set but session hasn't loaded.
 
 ## Common Gotchas
 
@@ -317,6 +369,10 @@ The iframe is the SaaS PAL UI. Do not fork SaaS features for comfy — reuse. Ac
 - Free-tier gets anonymous 24h JWT auto-injected via `comfy=1` param
 - `/pal/static/*` has no auth gate — client-side JS/CSS, not data
 - `pal_renderer` deps are installed separately; pal_node.py loads even without them (lazy imports)
+- Iframe `allow="fullscreen; clipboard-read; clipboard-write"` attribute set on `<iframe>` lets the viewport use clipboard and fullscreen — but `showDirectoryPicker` stays blocked (hard browser rule for cross-origin iframes). Use node-side file pickers instead.
+- Two resolution pickers exist in the viewport: the main Render-modal dropdown AND the quick-access `showResolutionModal`. Both need plan gates for >512 — gating only one lets the other bypass the free-tier cap.
+- Output socket names use spaces not underscores (`beauty pass` not `beauty_pass`) — matches the docs aesthetic but means any rename breaks saved workflow wires.
+- Widget default INT values require `{"min": N}` below the desired default; omitting `min` lets ComfyUI send empty strings → Python `int('')` → `ValueError`.
 
 ## Testing
 
@@ -332,16 +388,37 @@ We've had multiple rounds of "no frame reaches Video Combine" bugs caused by Pyt
 
 ## Deployment
 
-Install as custom node (symlink for development):
+Install as custom node (symlink / junction for development):
+
+**macOS / Linux:**
 ```bash
 cd ~/Documents/ComfyUI/custom_nodes
 ln -s /path/to/comfyui-lenscowboy-pal .
-# Main node deps (minimal)
 ~/Documents/ComfyUI/.venv/bin/python -m pip install -r comfyui-lenscowboy-pal/requirements.txt
-# Local renderer deps (optional — only needed for use_local_renderer=True)
 ~/Documents/ComfyUI/.venv/bin/python -m pip install -r comfyui-lenscowboy-pal/pal_renderer/requirements.txt
-# Restart ComfyUI
 ```
+
+**Windows (from PowerShell) with the repo on D: and ComfyUI on D:\ComfyUI:**
+```powershell
+# Install comfy-cli, create workspace on D:\
+py -3.12 -m pip install --upgrade comfy-cli
+py -3.12 -m comfy_cli --workspace "D:\ComfyUI" install
+# Junction from custom_nodes to the repo (no admin needed)
+mklink /J "D:\ComfyUI\custom_nodes\comfyui-lenscowboy-pal" "D:\Projects\comfyui-lenscowboy-pal"
+# Requires Git for Windows on PATH (comfy-cli uses GitPython)
+# Launch
+py -3.12 -m comfy_cli launch
+```
+
+**Cross-OS git hygiene** (editing from WSL, running on Windows):
+```bash
+git config core.filemode false   # NTFS reports every file as 0755
+git config core.autocrlf false
+git config core.eol lf
+```
+Plus a committed `.gitattributes` with `* text=auto eol=lf` so the policy travels with the repo.
+
+Restart ComfyUI after any Python change. Hard-refresh the browser (Ctrl+Shift+R, or right-click reload → Empty Cache and Hard Reload) after any JS change.
 
 ## Related memory
 
