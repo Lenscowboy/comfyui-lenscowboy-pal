@@ -57,7 +57,9 @@ class PALNode:
                 # ComfyUI's queue serializer actually sends its widget value
                 # back at execute time. JS hides the widget visually in
                 # onNodeCreated so it doesn't clutter the node UI.
-                "_pal_scene_state": ("STRING", {"default": "{}", "multiline": True}),
+                # Single-line STRING (not multiline) so ComfyUI renders a
+                # LiteGraph widget we can collapse, not a DOM textarea.
+                "_pal_scene_state": ("STRING", {"default": "{}"}),
             },
         }
 

@@ -121,6 +121,12 @@ app.registerExtension({
         this._stateWidget.computeSize = () => [0, -4];
         this._stateWidget.draw = () => {};
         this._stateWidget.hidden = true;
+        this._stateWidget.type = "hidden";
+        // Belt-and-braces — if a future ComfyUI renders this widget as a DOM
+        // element (textarea/input), hide that too. LiteGraph flags alone
+        // don't suppress DOM widgets.
+        const el = this._stateWidget.element || this._stateWidget.inputEl;
+        if (el && el.style) el.style.setProperty("display", "none", "important");
         // Shrink node height by whatever the widget was taking
         if (typeof this.setSize === "function" && this.size) {
           this.setSize([this.size[0], this.size[1]]);
