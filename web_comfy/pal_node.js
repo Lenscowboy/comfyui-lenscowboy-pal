@@ -45,6 +45,126 @@ function _bytesToBase64(buf) {
   return btoa(binary);
 }
 
+/* ── Texture harvesting for models with external references ────────
+ * Load3D uploads a model + its texture files into ComfyUI's /input/3d/.
+ * When we forward the model to the PAL iframe viewport, Three.js's
+ * GLTFLoader/OBJLoader try to resolve texture URIs against the iframe's
+ * origin (app.lenscowboy.com) and 404. Solution: fetch the referenced
+ * textures from ComfyUI's /view endpoint on the top-level side (which
+ * *can* reach 127.0.0.1:8188), base64-encode them, and ship them as
+ * resources alongside the model for the iframe to resolve locally.
+ */
+
+function _mimeForTextureName(name) {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "ktx2") return "image/ktx2";
+  if (ext === "basis") return "image/basis";
+  if (ext === "bin") return "application/octet-stream";
+  return "application/octet-stream";
+}
+
+async function _fetchResource(subfolder, filename) {
+  // Load3D stores adjacent files under the same subfolder the model lives
+  // in. Fetch via ComfyUI's /view endpoint (same mechanism used for the
+  // main model) and return a base64-encoded resource entry.
+  const url = `/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const buf = await resp.arrayBuffer();
+  return {
+    name: filename,
+    data: _bytesToBase64(buf),
+    mime: _mimeForTextureName(filename),
+  };
+}
+
+async function _harvestGltfTextures(gltfBuf, subfolder) {
+  // Parse the .gltf JSON, walk images[].uri and buffers[].uri,
+  // fetch each referenced external file. Skip data: URIs (already
+  // embedded) and remote URLs.
+  const resources = [];
+  let json;
+  try {
+    const text = new TextDecoder().decode(new Uint8Array(gltfBuf));
+    json = JSON.parse(text);
+  } catch (err) {
+    console.warn("[PAL comfy] Failed to parse .gltf for texture harvest:", err);
+    return resources;
+  }
+  const uris = new Set();
+  for (const img of (json.images || [])) {
+    if (img.uri && !img.uri.startsWith("data:") && !/^https?:/i.test(img.uri)) {
+      uris.add(img.uri);
+    }
+  }
+  for (const buf of (json.buffers || [])) {
+    if (buf.uri && !buf.uri.startsWith("data:") && !/^https?:/i.test(buf.uri)) {
+      uris.add(buf.uri);
+    }
+  }
+  await Promise.all([...uris].map(async (uri) => {
+    try {
+      const resource = await _fetchResource(subfolder, uri);
+      resources.push(resource);
+      console.log(`[PAL comfy] Harvested glTF resource: ${uri}`);
+    } catch (err) {
+      console.warn(`[PAL comfy] Failed to fetch glTF resource ${uri}:`, err);
+    }
+  }));
+  return resources;
+}
+
+async function _harvestObjTextures(objBuf, subfolder, objFilename) {
+  // OBJ files reference a .mtl sidecar via "mtllib <name>.mtl", and the
+  // .mtl references textures via map_Kd / map_Ks / map_Bump / norm / etc.
+  // Harvest both the .mtl and the textures it names.
+  const resources = [];
+  let mtlLib = null;
+  try {
+    const text = new TextDecoder().decode(new Uint8Array(objBuf));
+    const m = text.match(/^mtllib\s+(.+)$/m);
+    if (m) mtlLib = m[1].trim();
+  } catch (err) {
+    console.warn("[PAL comfy] Failed to scan .obj for mtllib:", err);
+    return resources;
+  }
+  // Fallback: try <basename>.mtl if no mtllib directive.
+  if (!mtlLib) mtlLib = objFilename.replace(/\.[^.]+$/, "") + ".mtl";
+
+  let mtlResource = null;
+  try {
+    mtlResource = await _fetchResource(subfolder, mtlLib);
+    resources.push(mtlResource);
+    console.log(`[PAL comfy] Harvested MTL: ${mtlLib}`);
+  } catch (err) {
+    // No .mtl present — untextured OBJ, nothing more to do.
+    return resources;
+  }
+
+  // Parse the .mtl for texture refs.
+  const mtlText = atob(mtlResource.data);
+  const mapKeys = /^(map_Kd|map_Ka|map_Ks|map_Ns|map_d|map_Bump|bump|norm|disp|decal|refl)\s+(?:.*\s)?(\S+)\s*$/gim;
+  const texNames = new Set();
+  let m;
+  while ((m = mapKeys.exec(mtlText)) !== null) {
+    const name = m[2].trim();
+    if (name && !name.startsWith("-")) texNames.add(name);
+  }
+  await Promise.all([...texNames].map(async (name) => {
+    try {
+      const r = await _fetchResource(subfolder, name);
+      resources.push(r);
+      console.log(`[PAL comfy] Harvested MTL texture: ${name}`);
+    } catch (err) {
+      console.warn(`[PAL comfy] Failed to fetch MTL texture ${name}:`, err);
+    }
+  }));
+  return resources;
+}
+
 async function _collectUpstreamModels(node) {
   const models = [];
   if (!node?.inputs || !node?.graph) return models;
@@ -75,13 +195,21 @@ async function _collectUpstreamModels(node) {
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const buf = await resp.arrayBuffer();
+      // Harvest sidecar textures for formats that reference external files.
+      let resources = [];
+      if (ext === "gltf") {
+        resources = await _harvestGltfTextures(buf, subfolder);
+      } else if (ext === "obj") {
+        resources = await _harvestObjTextures(buf, subfolder, filename);
+      }
       models.push({
         id: `upstream_${input.name}_${origin.id}`,
         name: filename,
         format: ext,
         data: _bytesToBase64(buf),
+        resources,
       });
-      console.log(`[PAL comfy] Fetched upstream ${input.name} from node ${origin.id}: ${filename}`);
+      console.log(`[PAL comfy] Fetched upstream ${input.name} from node ${origin.id}: ${filename} (+${resources.length} resources)`);
     } catch (err) {
       console.warn(`[PAL comfy] Failed to fetch upstream model for ${input.name}:`, err);
     }
