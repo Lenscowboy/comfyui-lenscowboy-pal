@@ -434,10 +434,11 @@ app.registerExtension({
         const byName = new Map((nodeRef._userTextures || []).map((r) => [r.name, r]));
         for (const u of uploaded) byName.set(u.name, u);
         nodeRef._userTextures = [...byName.values()];
-        if (nodeRef._texBtn) {
-          nodeRef._texBtn.name = `UPLOAD TEXTURES (${nodeRef._userTextures.length})`;
-          app.graph?.setDirtyCanvas?.(true);
-        }
+        // Vue frontend caches button widget labels at creation — setting
+        // widget.name doesn't repaint. Surface the texture count in the
+        // summary widget instead (which IS reactive to value changes).
+        nodeRef._updateSummary?.();
+        app.graph?.setDirtyCanvas?.(true);
         console.log(`[PAL comfy] User textures now: ${nodeRef._userTextures.length}`);
         input.remove();
       };
@@ -1143,6 +1144,7 @@ app.registerExtension({
       const objects = state.scene?.objects?.length || 0;
       const camera = state.camera?.position ? "set" : "default";
       const rendered = this._palRendered ? "rendered" : "not rendered";
+      const texCount = this._userTextures?.length || 0;
 
       // Phase 2 — connection status suffix
       let lcSuffix = "LC: \u2014";
@@ -1152,7 +1154,11 @@ app.registerExtension({
       }
 
       if (this._summaryWidget) {
-        this._summaryWidget.value = `${objects} objects | camera: ${camera} | ${rendered} | ${lcSuffix}`;
+        // Vue frontend caches button widget labels at creation, so the
+        // UPLOAD TEXTURES button can't show its own count. Surface it
+        // here when non-zero, to keep the summary tight.
+        const texPart = texCount ? ` | ${texCount} tex` : "";
+        this._summaryWidget.value = `${objects} objects | camera: ${camera} | ${rendered}${texPart} | ${lcSuffix}`;
       }
     };
   },
