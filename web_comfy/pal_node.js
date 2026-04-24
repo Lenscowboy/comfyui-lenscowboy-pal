@@ -960,6 +960,24 @@ app.registerExtension({
         const savedSettings = this._palState?.settings;
         const savedCameraSystem = this._palState?.cameraSystem;
 
+        // Per-object transforms don't ride along on pal:load-state (it
+        // strips scene.objects to avoid racing the async FBX loader).
+        // Stash each saved object's transform on its matching model so
+        // the iframe can apply it after the load completes — otherwise
+        // every reopen resets imported models to file-origin + scale 1.
+        const savedObjMap = new Map((savedScene?.objects || []).map(o => [o.id, o]));
+        for (const m of models) {
+          const obj = savedObjMap.get(m.id);
+          if (!obj) continue;
+          m.transform = {
+            position:   obj.position   || null,
+            rotation:   obj.rotation   || null,
+            quaternion: obj.quaternion || null,
+            scale:      obj.scale      || null,
+            visible:    obj.visible !== false,
+          };
+        }
+
         if (iframe.contentWindow) {
           // Small delay to let PAL init complete before posting state.
           setTimeout(() => {
