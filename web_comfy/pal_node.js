@@ -224,6 +224,18 @@ app.registerExtension({
   async beforeRegisterNodeDef(nodeType, nodeData, app) {
     if (nodeData.name !== "PALLayoutNode") return;
 
+    // Mirror _palState into a per-node localStorage cache. Belt-and-braces
+    // for the case where ComfyUI shuts down before the workflow auto-save
+    // catches the latest widget value — onNodeCreated picks the cache up
+    // and re-hydrates _palState. Cheap (a few KB JSON) and idempotent.
+    const _palWriteCache = (node) => {
+      try {
+        const k = "pal_comfy_state_" + (node.id || "default");
+        const json = JSON.stringify(node._palState || {});
+        if (json && json.length > 2) localStorage.setItem(k, json);
+      } catch (_) { /* localStorage full / disabled — non-fatal */ }
+    };
+
     const origOnCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
       origOnCreated?.apply(this, arguments);
@@ -241,6 +253,31 @@ app.registerExtension({
           if (parsed && typeof parsed === "object") this._palState = parsed;
         } catch (err) {
           console.warn("[PAL comfy] failed to parse saved _pal_scene_state — starting fresh", err);
+        }
+      }
+      // Recovery cache fallback — if the widget value was lost (e.g.
+      // ComfyUI restarted before the auto-save caught the latest flush),
+      // try the localStorage cache. Per-node key so multi-PAL workflows
+      // don't collide. Cache survives ComfyUI restart even when the
+      // workflow JSON didn't pick up the latest widget value. See 6c
+      // memory file.
+      if (!this._palState.beauty_b64 && !this._palState.scene && !this._palState.cameraSystem) {
+        try {
+          const cacheKey = "pal_comfy_state_" + (this.id || "default");
+          const cached = localStorage.getItem(cacheKey);
+          if (cached && cached.length > 2) {
+            const recovered = JSON.parse(cached);
+            if (recovered && typeof recovered === "object" && Object.keys(recovered).length > 0) {
+              this._palState = recovered;
+              console.log("[PAL comfy] recovered _palState from localStorage cache:", cacheKey);
+              // Push the recovered state back into the widget so the next
+              // workflow save persists it the canonical way.
+              const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
+              if (widget) widget.value = JSON.stringify(this._palState);
+            }
+          }
+        } catch (err) {
+          console.warn("[PAL comfy] localStorage recovery failed:", err);
         }
       }
 
@@ -902,6 +939,7 @@ app.registerExtension({
           this._palRendered = true;
           // Flush to the hidden widget immediately so the queue reads current
           // state even if the user queues without re-entering the modal.
+          // Also mirror to localStorage cache (6c safety net).
           const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
           const stateJson = JSON.stringify(this._palState || {});
           if (widget) {
@@ -910,6 +948,7 @@ app.registerExtension({
           } else {
             console.warn(`[PAL comfy] pal:render — _pal_scene_state widget not found; widgets=`, this.widgets?.map(w => w.name));
           }
+          _palWriteCache(this);
           this._updateSummary();
           // Auto-queue the ComfyUI graph so the rendered beauty shows up
           // in downstream Preview / Video Combine nodes immediately —
@@ -1146,10 +1185,12 @@ app.registerExtension({
         });
       }
 
-      // Serialise the freshest scene state to the hidden widget
+      // Serialise the freshest scene state to the hidden widget +
+      // localStorage cache (6c safety net).
       const stateJson = JSON.stringify(this._palState || {});
       const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
       if (widget) widget.value = stateJson;
+      _palWriteCache(this);
       this._updateSummary();
 
       // Cleanup
@@ -1197,6 +1238,7 @@ app.registerExtension({
       } else {
         console.warn(`[PAL comfy] beforeQueuePrompt — _pal_scene_state widget not found; widgets=`, node.widgets?.map(w => w.name));
       }
+      _palWriteCache(node);
 
       // Local-renderer path renders inside execute(), no viewport round-trip
       // needed — let it through even with empty state.
