@@ -405,38 +405,57 @@ app.registerExtension({
 
     /* ── Manual texture upload picker ─────────────────────────── */
     nodeType.prototype._pickTextures = function () {
+      console.log("[PAL comfy] _pickTextures called");
+      const nodeRef = this;
       const input = document.createElement("input");
       input.type = "file";
       input.multiple = true;
       input.accept = "image/*,.mtl";
-      input.style.display = "none";
+      // Position offscreen rather than display:none — some Chrome builds
+      // drop the change event on truly-hidden inputs.
+      input.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0;";
       document.body.appendChild(input);
-      input.addEventListener("change", async () => {
+      const handleChange = async () => {
+        console.log("[PAL comfy] picker change fired, files:", input.files?.length);
         const files = Array.from(input.files || []);
         if (!files.length) { input.remove(); return; }
         const readers = files.map((f) => new Promise((resolve) => {
           const reader = new FileReader();
           reader.onload = () => {
-            // Strip data URL prefix to get pure base64.
             const result = typeof reader.result === "string" ? reader.result : "";
             const comma = result.indexOf(",");
             const b64 = comma >= 0 ? result.slice(comma + 1) : result;
             resolve({ name: f.name, mime: f.type || "application/octet-stream", data: b64 });
           };
-          reader.onerror = () => resolve(null);
+          reader.onerror = (e) => { console.warn("[PAL comfy] reader error:", f.name, e); resolve(null); };
           reader.readAsDataURL(f);
         }));
         const uploaded = (await Promise.all(readers)).filter(Boolean);
-        // De-dupe by filename: newer uploads replace older ones of the same name.
-        const byName = new Map(this._userTextures.map((r) => [r.name, r]));
+        const byName = new Map((nodeRef._userTextures || []).map((r) => [r.name, r]));
         for (const u of uploaded) byName.set(u.name, u);
-        this._userTextures = [...byName.values()];
-        if (this._texBtn) {
-          this._texBtn.name = `UPLOAD TEXTURES (${this._userTextures.length})`;
+        nodeRef._userTextures = [...byName.values()];
+        if (nodeRef._texBtn) {
+          nodeRef._texBtn.name = `UPLOAD TEXTURES (${nodeRef._userTextures.length})`;
+          app.graph?.setDirtyCanvas?.(true);
         }
-        console.log(`[PAL comfy] User textures now: ${this._userTextures.length}`);
+        console.log(`[PAL comfy] User textures now: ${nodeRef._userTextures.length}`);
         input.remove();
-      });
+      };
+      input.addEventListener("change", handleChange);
+      // Fallback: if change somehow doesn't fire, poll files briefly
+      // after picker closes. Catches the rare case where focus returns
+      // before the change event (happens on some Chromium versions).
+      window.addEventListener("focus", function onRefocus() {
+        window.removeEventListener("focus", onRefocus);
+        setTimeout(() => {
+          if (document.body.contains(input) && input.files?.length) {
+            console.log("[PAL comfy] focus-fallback caught", input.files.length, "files");
+            handleChange();
+          } else if (document.body.contains(input) && !input.files?.length) {
+            input.remove();
+          }
+        }, 300);
+      }, { once: true });
       input.click();
     };
 
@@ -874,10 +893,11 @@ app.registerExtension({
           // unreliable — _lcSession is async and reads null if the handler
           // fires before /pal/session resolves, causing spurious upgrade
           // modals for enterprise users.
-          this._palState.beauty_b64 = msg.beauty;
-          this._palState.depth_b64  = msg.depth   || "";
-          this._palState.normal_b64 = msg.normals || "";
-          this._palState.alpha_b64  = msg.alpha   || "";
+          this._palState.beauty_b64   = msg.beauty;
+          this._palState.depth_b64    = msg.depth   || "";
+          this._palState.normal_b64   = msg.normals || "";
+          this._palState.alpha_b64    = msg.alpha   || "";
+          this._palState.id_matte_b64 = msg.matte   || "";
           this._palRendered = true;
           // Flush to the hidden widget immediately so the queue reads current
           // state even if the user queues without re-entering the modal.
@@ -1154,9 +1174,19 @@ app.registerExtension({
         console.warn(`[PAL comfy] beforeQueuePrompt — _pal_scene_state widget not found; widgets=`, node.widgets?.map(w => w.name));
       }
 
-      if (node._palState && Object.keys(node._palState).length > 0 && !node._palRendered) {
-        // State exists but passes not rendered — warn user
-        const msg = "PAL viewport has unsaved renders. Click 'Render All' in the viewport before queuing.";
+      // Local-renderer path renders inside execute(), no viewport round-trip
+      // needed — let it through even with empty state.
+      const useLocal = !!node.widgets?.find(w => w.name === "use_local_renderer")?.value;
+      if (useLocal) continue;
+
+      if (!node._palRendered) {
+        // Either: state empty (user dropped node and queued without opening
+        // viewport) or state populated but not rendered (opened viewport,
+        // moved things, queued without hitting Render). Both produce blank
+        // outputs downstream, so block both.
+        const msg = node._palState && Object.keys(node._palState).length > 0
+          ? "PAL viewport has unsaved renders. Open the viewport, click Render, then queue."
+          : "PAL node has no rendered passes yet. Open the viewport, click Render, then queue. (Or enable use_local_renderer to render inside execute().)";
         if (typeof app.ui?.dialog?.show === "function") {
           app.ui.dialog.show(msg);
         } else {

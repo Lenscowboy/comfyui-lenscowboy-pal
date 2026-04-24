@@ -126,6 +126,9 @@ class PALNode:
         #  1. Local renderer (pygfx, offscreen) — direct render, no iframe needed
         #  2. Iframe round-trip — decode base64 passes from _pal_scene_state
         alpha = self._blank(render_width, render_height, 1)
+        # id_matte is overwritten by the iframe path below when the matte
+        # base64 arrives; only the local-renderer path leaves this default
+        # in place when the renderer returns no id_matte.
         id_matte = self._blank(render_width, render_height)
 
         if use_local_renderer:
@@ -171,6 +174,11 @@ class PALNode:
             depth = self._decode_pass(state.get("depth_b64"), _bw, _bh, channels=1) if has_multipass else self._blank(_bw, _bh, 1)
             normals = self._decode_pass(state.get("normal_b64"), _bw, _bh) if has_multipass else self._blank(_bw, _bh)
             alpha = self._decode_pass(state.get("alpha_b64"), _bw, _bh, channels=1) if has_multipass else self._blank(_bw, _bh, 1)
+            # id_matte_b64 ride-along — paid plans only, sized to match beauty.
+            if has_multipass and state.get("id_matte_b64"):
+                id_matte = self._decode_pass(state.get("id_matte_b64"), _bw, _bh)
+            else:
+                id_matte = self._blank(_bw, _bh)
 
         scene_data = state.get("scene", resolved.get("scene_state", {}))
         if isinstance(scene_data, str):
