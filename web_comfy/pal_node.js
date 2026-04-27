@@ -396,46 +396,61 @@ app.registerExtension({
         if (brandWidget) brandWidget.computeSize = () => [0, 60];
       }
 
-      // Open Viewport button — classic LiteGraph button. The new Vue
-      // frontend captures pointer events on the canvas layer, so DOM
-      // buttons added via addDOMWidget render but don't receive clicks.
-      // The LiteGraph button path is the only reliable click handler.
-      const btn = this.addWidget("button", "OPEN VIEWPORT", "open_viewport", () => {
+      // Open Viewport — DOM button so we can actually style it on the Vue
+      // frontend (which ignores LiteGraph's canvas draw() hooks). Real
+      // <button> with pointer-events:auto receives clicks reliably; the
+      // legacy "addDOMWidget buttons swallow clicks" note was specific
+      // to non-button DOM elements layered under the canvas overlay.
+      const _ovBtn = document.createElement("button");
+      _ovBtn.type = "button";
+      _ovBtn.textContent = "OPEN VIEWPORT";
+      _ovBtn.style.cssText = [
+        "width:calc(100% - 16px)",
+        "height:44px",
+        "margin:6px 8px",
+        "background:#1a1a18",
+        "border:1.5px solid rgba(245,196,0,0.55)",
+        "border-radius:6px",
+        "color:#f5c400",
+        "font-family:monospace",
+        "font-size:14px",
+        "font-weight:700",
+        "letter-spacing:0.12em",
+        "text-transform:uppercase",
+        "cursor:pointer",
+        "pointer-events:auto",
+        "transition:background 0.12s, border-color 0.12s",
+      ].join(";");
+      _ovBtn.addEventListener("mouseenter", () => {
+        _ovBtn.style.background = "#241f10";
+        _ovBtn.style.borderColor = "#f5c400";
+      });
+      _ovBtn.addEventListener("mouseleave", () => {
+        _ovBtn.style.background = "#1a1a18";
+        _ovBtn.style.borderColor = "rgba(245,196,0,0.55)";
+      });
+      _ovBtn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
         this._openViewport();
       });
-      btn.serialize = false;
-      // Make the button visually larger than default. computeSize bumps the
-      // row height; draw override paints a bigger amber label so the
-      // primary CTA stands out from the other widgets. Canvas frontend
-      // honours draw(); Vue frontend ignores it but still respects the
-      // taller row from computeSize so the button is a bigger click target.
-      btn.computeSize = () => [0, 42];
-      btn.draw = function(ctx, node, widget_width, y, H){
-        const margin = 10;
-        const x = margin, w = widget_width - margin * 2, h = H - 6;
-        const yy = y + 3;
-        // Body
-        ctx.fillStyle = "#1a1a18";
-        ctx.strokeStyle = "rgba(245,196,0,0.55)";
-        ctx.lineWidth = 1.5;
-        if (typeof ctx.roundRect === "function") {
-          ctx.beginPath();
-          ctx.roundRect(x, yy, w, h, 5);
-          ctx.fill();
-          ctx.stroke();
-        } else {
-          ctx.fillRect(x, yy, w, h);
-          ctx.strokeRect(x, yy, w, h);
-        }
-        // Label
-        ctx.fillStyle = "#f5c400";
-        ctx.font = "bold 13px monospace";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("OPEN VIEWPORT", x + w / 2, yy + h / 2 + 1);
-        ctx.textAlign = "left";
-        ctx.textBaseline = "alphabetic";
-      };
+      if (typeof this.addDOMWidget === "function") {
+        const ovWidget = this.addDOMWidget("open_viewport", "div", _ovBtn, {
+          serialize: false,
+          hideOnZoom: false,
+          getValue: () => "",
+          setValue: () => {},
+          getHeight: () => 56,
+        });
+        if (ovWidget) ovWidget.computeSize = () => [0, 56];
+      } else {
+        // Old LiteGraph fallback — no addDOMWidget, no Vue frontend.
+        // Use canvas button with custom draw so at least the click works.
+        const btnFallback = this.addWidget("button", "OPEN VIEWPORT", "open_viewport", () => {
+          this._openViewport();
+        });
+        btnFallback.serialize = false;
+      }
 
       // ── Manual texture upload ─────────────────────────────────
       // Fallback for models whose textures aren't reachable by auto-harvest
