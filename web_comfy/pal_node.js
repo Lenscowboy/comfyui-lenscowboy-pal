@@ -295,12 +295,21 @@ app.registerExtension({
       // so ComfyUI auto-creates a widget AND sends its value at queue time.
       // Here we find the auto-created widget and collapse it so the scene-
       // state JSON blob doesn't clutter the node UI.
+      //
+      // CRITICAL: do NOT set widget.type = "hidden" — that flag causes
+      // LiteGraph to skip the widget during node.serialize(), so the
+      // workflow JSON doesn't contain its value, so save→close→reopen
+      // erases all keyframes (the JSON loads, widget defaults to "{}",
+      // _palState resets, the iframe receives empty load-state on next
+      // open). The localStorage cache fallback at the top of this method
+      // helped in single-browser/same-node-id cases but was brittle.
+      // Visual hiding is sufficient via the computeSize/draw/hidden flags
+      // alone — type stays "STRING" so LiteGraph serializes normally.
       this._stateWidget = this.widgets?.find(w => w.name === "_pal_scene_state");
       if (this._stateWidget) {
         this._stateWidget.computeSize = () => [0, -4];
         this._stateWidget.draw = () => {};
         this._stateWidget.hidden = true;
-        this._stateWidget.type = "hidden";
         // Belt-and-braces — if a future ComfyUI renders this widget as a DOM
         // element (textarea/input), hide that too. LiteGraph flags alone
         // don't suppress DOM widgets.
