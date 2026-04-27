@@ -346,12 +346,42 @@ app.registerExtension({
       // frontend captures pointer events on the canvas layer, so DOM
       // buttons added via addDOMWidget render but don't receive clicks.
       // The LiteGraph button path is the only reliable click handler.
-      // Visual styling can't be customised (canvas draw hooks are no-ops
-      // on the new frontend), but functionality is guaranteed.
       const btn = this.addWidget("button", "OPEN VIEWPORT", "open_viewport", () => {
         this._openViewport();
       });
       btn.serialize = false;
+      // Make the button visually larger than default. computeSize bumps the
+      // row height; draw override paints a bigger amber label so the
+      // primary CTA stands out from the other widgets. Canvas frontend
+      // honours draw(); Vue frontend ignores it but still respects the
+      // taller row from computeSize so the button is a bigger click target.
+      btn.computeSize = () => [0, 42];
+      btn.draw = function(ctx, node, widget_width, y, H){
+        const margin = 10;
+        const x = margin, w = widget_width - margin * 2, h = H - 6;
+        const yy = y + 3;
+        // Body
+        ctx.fillStyle = "#1a1a18";
+        ctx.strokeStyle = "rgba(245,196,0,0.55)";
+        ctx.lineWidth = 1.5;
+        if (typeof ctx.roundRect === "function") {
+          ctx.beginPath();
+          ctx.roundRect(x, yy, w, h, 5);
+          ctx.fill();
+          ctx.stroke();
+        } else {
+          ctx.fillRect(x, yy, w, h);
+          ctx.strokeRect(x, yy, w, h);
+        }
+        // Label
+        ctx.fillStyle = "#f5c400";
+        ctx.font = "bold 13px monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("OPEN VIEWPORT", x + w / 2, yy + h / 2 + 1);
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+      };
 
       // ── Manual texture upload ─────────────────────────────────
       // Fallback for models whose textures aren't reachable by auto-harvest
