@@ -923,6 +923,15 @@ app.registerExtension({
           if (s.camera)       this._palState.camera       = s.camera;
           if (s.settings)     this._palState.settings     = s.settings;
           if (s.cameraSystem) this._palState.cameraSystem = s.cameraSystem;
+          // Persist on EVERY pal:state — covers the periodic auto-push from
+          // the iframe (every 10s while modal open) and any future proactive
+          // sends. Previously only Save & Close + pal:render wrote the cache,
+          // which meant a browser refresh / tab close mid-session lost any
+          // keyframes added since the last render. Cache + widget flush is
+          // cheap (a few KB JSON, idempotent localStorage.setItem).
+          const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
+          if (widget) widget.value = JSON.stringify(this._palState || {});
+          _palWriteCache(this);
         }
         if (msg.type === "pal:render") {
           // Do not gate passes client-side. Server-side pal_node.execute()
