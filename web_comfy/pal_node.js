@@ -464,6 +464,20 @@ app.registerExtension({
       });
       this._texBtn.serialize = false;
 
+      // Load 3D Scene — same pattern as UPLOAD TEXTURES but for geometry.
+      // Lets users bring in their own .glb / .gltf / .obj / .fbx without
+      // routing through Comfy's built-in Load 3D node (which crashes on
+      // missing input — see comfy_extras/nodes_load_3d.py:55). The picker
+      // reads each file as base64 and stashes onto _userScenes; on every
+      // iframe open the comfy bridge merges _userScenes into the
+      // pal:load-models payload, so the scene rebuilds reliably across
+      // close → reopen → ComfyUI restart cycles.
+      this._userScenes = [];
+      this._sceneBtn = this.addWidget("button", "LOAD 3D SCENE (0)", "load_3d_scene", () => {
+        this._pickScene();
+      });
+      this._sceneBtn.serialize = false;
+
       // Scene summary widget (read-only text)
       this._summaryWidget = this.addWidget("text", "scene_summary", "No scene loaded", () => {}, {
         serialize: false,
@@ -596,6 +610,94 @@ app.registerExtension({
         setTimeout(() => {
           if (document.body.contains(input) && input.files?.length) {
             console.log("[PAL comfy] focus-fallback caught", input.files.length, "files");
+            handleChange();
+          } else if (document.body.contains(input) && !input.files?.length) {
+            input.remove();
+          }
+        }, 300);
+      }, { once: true });
+      input.click();
+    };
+
+    /* ── Load 3D Scene picker — sibling of _pickTextures ───────── */
+    // Accepts the usual formats the iframe's pal:load-models handler knows
+    // about: .glb, .gltf, .obj, .fbx. Each file is read as base64 and pushed
+    // onto _userScenes with {id, name, format, data} — the iframe-open path
+    // already merges this into the pal:load-models payload alongside
+    // upstream-node models, glb_path, and saved-state models.
+    //
+    // Multi-file gltf+textures: textures should also be uploaded via UPLOAD
+    // TEXTURES — the iframe's LoadingManager URL modifier resolves them by
+    // filename. Single-file .glb / .fbx are zero-config.
+    nodeType.prototype._pickScene = function () {
+      console.log("[PAL comfy] _pickScene called");
+      const nodeRef = this;
+      const input = document.createElement("input");
+      input.type = "file";
+      input.multiple = true;
+      input.accept = ".glb,.gltf,.obj,.fbx";
+      input.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0;";
+      document.body.appendChild(input);
+      const handleChange = async () => {
+        console.log("[PAL comfy] scene picker change fired, files:", input.files?.length);
+        const files = Array.from(input.files || []);
+        if (!files.length) { input.remove(); return; }
+        const formatFor = (name) => {
+          const m = (name || "").toLowerCase().match(/\.(glb|gltf|obj|fbx)$/);
+          return m ? m[1] : "";
+        };
+        const readers = files.map((f) => new Promise((resolve) => {
+          const fmt = formatFor(f.name);
+          if (!fmt) { resolve(null); return; }
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = typeof reader.result === "string" ? reader.result : "";
+            const comma = result.indexOf(",");
+            const b64 = comma >= 0 ? result.slice(comma + 1) : result;
+            // Stable id per file name — re-uploading same name replaces the
+            // previous load instead of duplicating in the scene.
+            const id = "user_scene_" + f.name.replace(/[^a-zA-Z0-9_]/g, "_");
+            resolve({ id, name: f.name, format: fmt, data: b64 });
+          };
+          reader.onerror = (e) => { console.warn("[PAL comfy] scene reader error:", f.name, e); resolve(null); };
+          reader.readAsDataURL(f);
+        }));
+        const uploaded = (await Promise.all(readers)).filter(Boolean);
+        if (!uploaded.length) { input.remove(); return; }
+        // De-dup by id (so re-picking the same file replaces, doesn't dup).
+        const byId = new Map((nodeRef._userScenes || []).map((r) => [r.id, r]));
+        for (const u of uploaded) byId.set(u.id, u);
+        nodeRef._userScenes = [...byId.values()];
+
+        // If iframe is currently open, push the new models live so the user
+        // sees them appear without having to re-open the modal.
+        try {
+          const modal = document.getElementById("pal-comfy-modal");
+          const iframe = modal?.querySelector("iframe");
+          if (iframe?.contentWindow) {
+            // Merge user textures into resources for relative-URI resolution
+            // (matches the on-open merge logic in _openViewport).
+            const models = uploaded.map((u) => {
+              const m = { ...u };
+              if (nodeRef._userTextures?.length) m.resources = [...nodeRef._userTextures];
+              return m;
+            });
+            iframe.contentWindow.postMessage({ type: "pal:load-models", models }, "*");
+            console.log(`[PAL comfy] live-pushed ${models.length} scene model(s) to open iframe`);
+          }
+        } catch (err) { console.warn("[PAL comfy] live scene push failed:", err); }
+
+        nodeRef._updateSummary?.();
+        app.graph?.setDirtyCanvas?.(true);
+        console.log(`[PAL comfy] User scenes now: ${nodeRef._userScenes.length}`);
+        input.remove();
+      };
+      input.addEventListener("change", handleChange);
+      window.addEventListener("focus", function onRefocus() {
+        window.removeEventListener("focus", onRefocus);
+        setTimeout(() => {
+          if (document.body.contains(input) && input.files?.length) {
+            console.log("[PAL comfy] scene focus-fallback caught", input.files.length, "files");
             handleChange();
           } else if (document.body.contains(input) && !input.files?.length) {
             input.remove();
@@ -1096,7 +1198,13 @@ app.registerExtension({
         // Walk graph for upstream models so the viewport shows them on first open,
         // before the user has queued a prompt (which is what populates _palState).
         const upstreamModels = await _collectUpstreamModels(this);
-        const models = [...stateModels, ...upstreamModels];
+        // _userScenes — files added via LOAD 3D SCENE button. Survives
+        // close→reopen because they're persisted on the node instance and
+        // round-trip through the workflow JSON via the same widgets-values
+        // path as _palState (each scene entry already has the base64 bytes
+        // captured at pick time).
+        const userSceneModels = (this._userScenes || []).map((s) => ({ ...s }));
+        const models = [...stateModels, ...upstreamModels, ...userSceneModels];
         if (glbPath) models.push({ id: "glb_path", name: glbPath.split("/").pop(), format: "glb", path: glbPath });
 
         // Merge user-uploaded textures into every model's resources so the
@@ -1321,6 +1429,7 @@ app.registerExtension({
       const camera = state.camera?.position ? "set" : "default";
       const rendered = this._palRendered ? "rendered" : "not rendered";
       const texCount = this._userTextures?.length || 0;
+      const sceneCount = this._userScenes?.length || 0;
 
       // Phase 2 — connection status suffix
       let lcSuffix = "LC: \u2014";
@@ -1334,7 +1443,8 @@ app.registerExtension({
         // UPLOAD TEXTURES button can't show its own count. Surface it
         // here when non-zero, to keep the summary tight.
         const texPart = texCount ? ` | ${texCount} tex` : "";
-        this._summaryWidget.value = `${objects} objects | camera: ${camera} | ${rendered}${texPart} | ${lcSuffix}`;
+        const scenePart = sceneCount ? ` | ${sceneCount} scene${sceneCount > 1 ? "s" : ""}` : "";
+        this._summaryWidget.value = `${objects} objects | camera: ${camera} | ${rendered}${texPart}${scenePart} | ${lcSuffix}`;
       }
     };
   },
