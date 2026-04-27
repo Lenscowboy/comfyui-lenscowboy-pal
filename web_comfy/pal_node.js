@@ -236,6 +236,42 @@ app.registerExtension({
       } catch (_) { /* localStorage full / disabled — non-fatal */ }
     };
 
+    // Belt-and-braces persistence — stash _palState into node.properties
+    // on serialize, read it back on configure. LiteGraph guarantees that
+    // node.properties (a plain dict on the node object) round-trips through
+    // workflow JSON regardless of widget visibility / type quirks. If a
+    // future ComfyUI / LiteGraph version changes how widgets serialize,
+    // properties stays the canonical source of truth and keyframes survive.
+    const origOnSerialize = nodeType.prototype.onSerialize;
+    nodeType.prototype.onSerialize = function (o) {
+      origOnSerialize?.apply(this, arguments);
+      try {
+        const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
+        const latest = (widget && typeof widget.value === "string" && widget.value.length > 2)
+          ? widget.value
+          : JSON.stringify(this._palState || {});
+        o.properties = o.properties || {};
+        o.properties._pal_state_backup = latest;
+      } catch (err) {
+        console.warn("[PAL comfy] onSerialize properties backup failed", err);
+      }
+    };
+    const origOnConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function (o) {
+      origOnConfigure?.apply(this, arguments);
+      // If the widget value came back empty after JSON load, fall back to
+      // properties._pal_state_backup. Stash on this._palStateFromConfigure
+      // for onNodeCreated to consume — onConfigure runs before onNodeCreated
+      // when loading a workflow, so direct widget mutation here would be
+      // overwritten by the auto-create flow.
+      try {
+        const backup = (o && o.properties && o.properties._pal_state_backup) || "";
+        if (backup && backup.length > 2) {
+          this._palStateFromConfigure = backup;
+        }
+      } catch (_) { /* defensive — non-fatal */ }
+    };
+
     const origOnCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
       origOnCreated?.apply(this, arguments);
@@ -253,6 +289,24 @@ app.registerExtension({
           if (parsed && typeof parsed === "object") this._palState = parsed;
         } catch (err) {
           console.warn("[PAL comfy] failed to parse saved _pal_scene_state — starting fresh", err);
+        }
+      }
+      // onConfigure-stash fallback — workflow JSON had a properties backup
+      // but the widget didn't restore (some ComfyUI/LiteGraph versions skip
+      // widgets that aren't in widgets_values yet during configure). Use the
+      // properties backup as authoritative if widget came back empty.
+      if ((!this._palState || Object.keys(this._palState).length === 0)
+          && this._palStateFromConfigure) {
+        try {
+          const parsed = JSON.parse(this._palStateFromConfigure);
+          if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) {
+            this._palState = parsed;
+            const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
+            if (widget) widget.value = this._palStateFromConfigure;
+            console.log("[PAL comfy] recovered _palState from properties._pal_state_backup");
+          }
+        } catch (err) {
+          console.warn("[PAL comfy] properties._pal_state_backup parse failed", err);
         }
       }
       // Recovery cache fallback — if the widget value was lost (e.g.
