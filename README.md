@@ -20,13 +20,13 @@ Set up camera angles, position subjects, light your scene, then render beauty, d
 ## Optional: LensCowboy Platform Integration
 
 Connect with a LensCowboy API key to unlock:
-- Load shots from LCBE Breakdown
-- Access project asset libraries from Google Drive
-- Save scenes to cloud
-- Write camera and frame data back to the Pipeline sheet
-- Multi-shot sequence export
+- Multi-pass renders (depth, normal, alpha, ID matte)
+- Higher-resolution beauty pass (above 512px)
+- Project asset library browsing
 
-No API key needed for local use — the node is a fully capable standalone tool.
+No API key needed for local use — the node is a fully capable standalone tool with a free-tier 512px beauty pass.
+
+> **v1.0** ships single-frame rendering. Animated sequence renders (IMAGE batches for KSampler / Video Combine), Load from LCBE Breakdown, and write-back to the Pipeline sheet are coming in **v1.1**.
 
 ### Get an API Key
 
@@ -35,7 +35,7 @@ No API key needed for local use — the node is a fully capable standalone tool.
 3. Click **+ Generate New Key** (optionally label it, e.g. `home-pc`)
 4. Copy it and paste into the PAL node's `lc_api_key` field
 
-Features unlock based on your subscription plan. If you downgrade, existing keys automatically lose the dropped features — no remint required. Up to 5 keys per account; revoke any of them from the same page.
+Features unlock based on your subscription plan. If you downgrade, existing keys automatically lose the dropped features — no remint required. Keys expire after 365 days. Up to 5 keys per account; revoke any of them from the same page.
 
 ## Install
 

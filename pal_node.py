@@ -75,17 +75,10 @@ class PALNode:
         render_width = min(max(render_width, 64), 2048)
         render_height = min(max(render_height, 64), 2048)
 
-        # Diagnostic: how much state did execute() actually receive from the queue?
-        # Using print+stderr+flush because ComfyUI Desktop doesn't always route
-        # logger.warning to the user-visible log file.
-        import sys as _sys
-        _state_len = len(_pal_scene_state) if isinstance(_pal_scene_state, str) else 0
-        print(f"[PAL Node] execute() called — _pal_scene_state type={type(_pal_scene_state).__name__} length={_state_len}", file=_sys.stderr, flush=True)
         try:
             state = json.loads(_pal_scene_state) if _pal_scene_state else {}
         except json.JSONDecodeError:
             state = {}
-        print(f"[PAL Node] state keys={list(state.keys())}, beauty_b64 present={'beauty_b64' in state and bool(state.get('beauty_b64'))}", file=_sys.stderr, flush=True)
 
         # Merge inputs + resolve plan
         lc_data = {}
@@ -210,16 +203,6 @@ class PALNode:
         try:
             raw = base64.b64decode(b64_str)
             img = Image.open(io.BytesIO(raw))
-            # Diagnostic: dump decoded pass to /tmp so we can visually verify
-            # what the iframe actually captured. One file per channel kind.
-            try:
-                import os, sys
-                tag = "gray" if channels == 1 else "rgb"
-                dbg_path = f"/tmp/pal_{tag}_{img.size[0]}x{img.size[1]}.png"
-                img.save(dbg_path)
-                print(f"[PAL Node] decoded {tag} pass {img.size[0]}x{img.size[1]} ({len(raw)} bytes) -> {dbg_path}", file=sys.stderr, flush=True)
-            except Exception as e:
-                import sys as _s; print(f"[PAL Node] dbg dump failed: {e}", file=_s.stderr, flush=True)
             if channels == 1:
                 # ComfyUI IMAGE expects (H,W,3) RGB even for grayscale passes.
                 # PIL.Image.fromarray can't handle (H,W,1). Replicate grayscale
@@ -230,7 +213,7 @@ class PALNode:
                 arr = np.array(img.convert("RGB"), dtype=np.float32) / 255.0
             return self._to_image_tensor(arr[np.newaxis, ...])
         except Exception as e:
-            import sys as _s; print(f"[PAL Node] _decode_pass exception: {e}", file=_s.stderr, flush=True)
+            logger.warning(f"[PAL Node] _decode_pass exception: {e}")
             return self._blank(width, height, channels)
 
     def _resolve_models(self, glb_path="", glb_input=None, obj_input=None, model_3d_input=None):

@@ -472,13 +472,6 @@ app.registerExtension({
           : JSON.stringify(this._palState || {});
         o.properties = o.properties || {};
         o.properties._pal_state_backup = latest;
-        // DIAG: log what we're putting into the workflow JSON. If save
-        // produces an empty scene, this tells us whether widget.value or
-        // _palState was the source and whether scene was actually present.
-        const wantsScene = (() => {
-          try { const p = JSON.parse(latest); return !!p?.scene?.objects?.length; } catch { return false; }
-        })();
-        console.log(`[PAL comfy DIAG] onSerialize: backup length=${latest.length}, has scene.objects=${wantsScene}, in-mem _palState scene.objects=${this._palState?.scene?.objects?.length || 0}`);
       } catch (err) {
         console.warn("[PAL comfy] onSerialize properties backup failed", err);
       }
@@ -502,7 +495,6 @@ app.registerExtension({
           const parsed = JSON.parse(v);
           if (parsed && typeof parsed === "object") {
             this._palState = parsed;
-            console.log(`[PAL comfy DIAG] onConfigure re-hydrate: scene.objects=${parsed.scene?.objects?.length || 0}, keyframes=${!!parsed.scene?.keyframes}, camera=${!!parsed.camera}, cameraSystem=${!!parsed.cameraSystem}`);
           }
         }
       } catch (err) {
@@ -591,7 +583,6 @@ app.registerExtension({
       // message to the iframe, dropping keyframes.
       this._palState = {};
       const savedBlob = this.widgets?.find(w => w.name === "_pal_scene_state")?.value;
-      console.log(`[PAL comfy DIAG] onNodeCreated: widget.value length=${savedBlob?.length ?? 0}, configBackup=${this._palStateFromConfigure?.length ?? 0}`);
       if (savedBlob && typeof savedBlob === "string" && savedBlob.length > 2) {
         try {
           const parsed = JSON.parse(savedBlob);
@@ -600,7 +591,6 @@ app.registerExtension({
           console.warn("[PAL comfy] failed to parse saved _pal_scene_state — starting fresh", err);
         }
       }
-      console.log(`[PAL comfy DIAG] onNodeCreated: hydrated _palState — has scene.objects=${!!this._palState.scene?.objects} (${this._palState.scene?.objects?.length || 0}), has camera=${!!this._palState.camera}, has cameraSystem=${!!this._palState.cameraSystem}, has keyframes=${!!this._palState.scene?.keyframes}`);
       // onConfigure-stash fallback — workflow JSON had a properties backup
       // but the widget didn't restore (some ComfyUI/LiteGraph versions skip
       // widgets that aren't in widgets_values yet during configure). Use the
@@ -1674,7 +1664,6 @@ app.registerExtension({
         if (!msg || !msg.type) return;
         if (msg.type === "pal:state" && msg.state) {
           const s = msg.state;
-          console.log(`[PAL comfy DIAG] pal:state IN — sceneObj=${s.scene?.objects?.length || 0}, hasKf=${!!s.scene?.keyframes}, hasCam=${!!s.camera}, hasCamSys=${!!s.cameraSystem}`);
           // Merge incoming scene/camera/settings/cameraSystem WITHOUT clobbering
           // the render passes (beauty_b64 etc.) that pal:render previously
           // wrote onto _palState. Wholesale replacement was wiping the
@@ -1686,7 +1675,6 @@ app.registerExtension({
           const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
           if (widget) widget.value = JSON.stringify(this._palState || {});
           _palWriteCache(this);
-          console.log(`[PAL comfy DIAG] pal:state OUT — _palState scene.objects=${this._palState.scene?.objects?.length || 0}, widget.length=${widget?.value?.length || 0}`);
         }
         if (msg.type === "pal:render") {
           // Render passes (multi-MB each) go to IndexedDB instead of
