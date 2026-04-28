@@ -295,8 +295,73 @@ async function _collectUpstreamModels(node) {
   return models;
 }
 
+// ── graphToPrompt monkey-patch: inject render passes for queue, restore after ──
+// Wraps app.graphToPrompt with a try/finally so for each PAL node we:
+//   1. Read passes from IDB (async, before super)
+//   2. Set widget.value = lean state + passes (full)
+//   3. Call original graphToPrompt — the SYNCHRONOUS prompt build inside
+//      reads the full widget value, sends it to the server, returns
+//   4. Restore widget.value back to the lean form
+// Result: only the queue read sees full bytes; autosave never does.
+// This replaces a setTimeout(0)-based restore that was racing the prompt
+// build (Comfy was reading the LEAN value because the macrotask fired
+// before the sync read in some build versions, leaving execute() with
+// blank passes — "nothing renders" symptom).
+let _palGraphToPromptPatched = false;
+function _palPatchGraphToPrompt() {
+  if (_palGraphToPromptPatched) return;
+  if (!app || typeof app.graphToPrompt !== "function") return;
+  _palGraphToPromptPatched = true;
+  const orig = app.graphToPrompt.bind(app);
+  app.graphToPrompt = async function (...args) {
+    const restorers = [];
+    try {
+      const palNodes = (this.graph?._nodes || []).filter((n) => n.type === "PALLayoutNode");
+      for (const node of palNodes) {
+        const widget = node.widgets?.find((w) => w.name === "_pal_scene_state");
+        if (!widget) continue;
+        const lean = widget.value;  // remember exact pre-injection value
+        try {
+          const uuid = _palAssetUuidFor(node);
+          const passes = await _palDBGetAllForNodeKind(uuid, "pass");
+          const passMap = new Map(passes.map((p) => [p.name, p.data || ""]));
+          const baseState = (() => {
+            try { return lean ? JSON.parse(lean) : {}; }
+            catch { return node._palState || {}; }
+          })();
+          const fullState = {
+            ...baseState,
+            beauty_b64:   passMap.get("beauty")   || "",
+            depth_b64:    passMap.get("depth")    || "",
+            normal_b64:   passMap.get("normal")   || "",
+            alpha_b64:    passMap.get("alpha")    || "",
+            id_matte_b64: passMap.get("id_matte") || "",
+          };
+          widget.value = JSON.stringify(fullState);
+          restorers.push(() => { widget.value = lean; });
+        } catch (err) {
+          console.warn("[PAL comfy] pass injection failed for node", node?.id, err);
+        }
+      }
+      const result = await orig(...args);
+      return result;
+    } finally {
+      for (const r of restorers) {
+        try { r(); } catch (_) { /* defensive */ }
+      }
+    }
+  };
+  console.log("[PAL comfy] app.graphToPrompt patched for PAL pass injection");
+}
+
 app.registerExtension({
   name: EXT_NAME,
+  async setup() {
+    // Patch happens once at extension setup. setup() is called by ComfyUI
+    // after app finishes initializing, so app.graphToPrompt is guaranteed
+    // to exist here.
+    _palPatchGraphToPrompt();
+  },
 
   async beforeRegisterNodeDef(nodeType, nodeData, app) {
     if (nodeData.name !== "PALLayoutNode") return;
@@ -412,17 +477,44 @@ app.registerExtension({
         }
       }
 
-      // Defensive: if an earlier broken version of this node embedded
-      // scene bytes into _palState, strip them out — those would re-fail
-      // workflow draft autosave forever. New persistence path is
-      // IndexedDB (loaded async below), so _palState should never carry
-      // _userScenes again.
-      if (this._palState && Array.isArray(this._palState._userScenes)) {
-        const purged = this._palState._userScenes.length;
-        delete this._palState._userScenes;
-        const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
-        if (widget) widget.value = JSON.stringify(this._palState);
-        console.log(`[PAL comfy] purged ${purged} legacy _userScenes from _palState (moved to IDB)`);
+      // Defensive: strip ANY legacy bloat from loaded _palState. Earlier
+      // commits embedded scene bytes (_userScenes) AND render passes
+      // (beauty_b64 / depth_b64 / normal_b64 / alpha_b64 / id_matte_b64)
+      // into _palState — both ride along through workflow JSON / autosave
+      // and blow the localStorage cap. Migrate render passes into IDB
+      // (one-time, on first load) and drop them + _userScenes from
+      // _palState so workflow autosave finally succeeds.
+      if (this._palState) {
+        let purgedAny = false;
+        if (Array.isArray(this._palState._userScenes)) {
+          delete this._palState._userScenes;
+          purgedAny = true;
+          console.log("[PAL comfy] purged legacy _userScenes from _palState");
+        }
+        const _legacyPassMap = {
+          beauty_b64: "beauty",
+          depth_b64: "depth",
+          normal_b64: "normal",
+          alpha_b64: "alpha",
+          id_matte_b64: "id_matte",
+        };
+        const _legacyUuid = _palAssetUuidFor(this);
+        for (const [key, kind] of Object.entries(_legacyPassMap)) {
+          if (this._palState[key]) {
+            // Migrate the bytes to IDB so this node's downstream queue
+            // still has them — losing them would leave the user staring
+            // at blank passes after the upgrade. Fire-and-forget.
+            const data = this._palState[key];
+            _palDBPut(_legacyUuid, "pass", kind, { data });
+            delete this._palState[key];
+            purgedAny = true;
+          }
+        }
+        if (purgedAny) {
+          const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
+          if (widget) widget.value = JSON.stringify(this._palState);
+          console.log("[PAL comfy] migrated legacy passes _palState → IDB; _palState now lean");
+        }
       }
 
       // Async hydration of _userScenes + _userTextures + render-pass
@@ -1821,34 +1913,16 @@ app.registerExtension({
       // next tick so autosave doesn't carry the bloat. Comfy reads the
       // widget value synchronously when building the prompt payload, so
       // the strip is safe to fire immediately after.
+      // Pass injection is now handled by the graphToPrompt monkey-patch
+      // (see _palPatchGraphToPrompt below) — wraps the synchronous prompt
+      // build with try/finally so widget.value carries passes for exactly
+      // the duration of the prompt-build read, with no setTimeout race.
+      // beforeQueuePrompt only flushes the lean _palState here.
       const widget = node.widgets?.find(w => w.name === "_pal_scene_state");
-      if (!widget) {
-        console.warn(`[PAL comfy] beforeQueuePrompt — _pal_scene_state widget not found; widgets=`, node.widgets?.map(w => w.name));
+      if (widget) {
+        widget.value = JSON.stringify(node._palState || {});
       } else {
-        const _qUuid = _palAssetUuidFor(node);
-        const passRows = await _palDBGetAllForNodeKind(_qUuid, "pass").catch(() => []);
-        const passMap = new Map(passRows.map((r) => [r.name, r.data || ""]));
-        const fullState = {
-          ...(node._palState || {}),
-          beauty_b64:   passMap.get("beauty")   || "",
-          depth_b64:    passMap.get("depth")    || "",
-          normal_b64:   passMap.get("normal")   || "",
-          alpha_b64:    passMap.get("alpha")    || "",
-          id_matte_b64: passMap.get("id_matte") || "",
-        };
-        const fullJson = JSON.stringify(fullState);
-        widget.value = fullJson;
-        console.log(`[PAL comfy] beforeQueuePrompt — injected passes (${fullJson.length} bytes, rendered=${node._palRendered})`);
-        // Restore lean widget on next tick — Comfy's prompt builder reads
-        // synchronously after this method returns; the macro task scheduled
-        // here fires after that read, before any autosave.
-        const leanJson = JSON.stringify(node._palState || {});
-        setTimeout(() => {
-          if (widget.value === fullJson) {
-            widget.value = leanJson;
-            console.log(`[PAL comfy] post-queue — widget restored to lean (${leanJson.length} bytes)`);
-          }
-        }, 0);
+        console.warn(`[PAL comfy] beforeQueuePrompt — _pal_scene_state widget not found; widgets=`, node.widgets?.map(w => w.name));
       }
       _palWriteCache(node);
 
