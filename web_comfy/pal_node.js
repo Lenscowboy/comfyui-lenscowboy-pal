@@ -756,7 +756,14 @@ app.registerExtension({
       const input = document.createElement("input");
       input.type = "file";
       input.multiple = true;
-      input.accept = ".glb,.gltf,.obj,.fbx";
+      // Accept primary model formats AND their sidecar resources so a multi-
+      // file glTF (.gltf + .bin + textures) loads from a single pick. Without
+      // .bin alongside the .gltf, GLTFLoader fails to resolve the buffer
+      // reference and the model never appears — that's the "gltf not showing
+      // up in viewport" case. Bundling resources onto each picked primary
+      // model lets the iframe's LoadingManager URL modifier resolve them by
+      // filename. Same convention as Comfy's auto-harvest path.
+      input.accept = ".glb,.gltf,.obj,.fbx,.bin,.mtl,image/png,image/jpeg,image/webp,image/bmp";
       input.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0;";
       document.body.appendChild(input);
       const handleChange = async () => {
@@ -766,6 +773,13 @@ app.registerExtension({
         const formatFor = (name) => {
           const m = (name || "").toLowerCase().match(/\.(glb|gltf|obj|fbx)$/);
           return m ? m[1] : "";
+        };
+        const isResource = (name) => {
+          // Anything that's not a primary 3D model is treated as a sidecar
+          // resource: .bin (glTF buffers), .mtl (OBJ materials), image
+          // textures, and any other file the user dragged in. Iframe's
+          // LoadingManager picks these up via the URL modifier.
+          return !formatFor(name);
         };
         // Pre-screen for oversized files — show the user EVERY rejection in
         // one alert rather than nagging them per-file.
@@ -781,30 +795,62 @@ app.registerExtension({
             "pieces, then re-import."
           );
         }
-        const acceptedFiles = files.filter((f) => f.size <= MAX_BYTES && formatFor(f.name));
-        if (!acceptedFiles.length) { input.remove(); return; }
-        const readers = acceptedFiles.map((f) => new Promise((resolve) => {
-          const fmt = formatFor(f.name);
+        const accepted = files.filter((f) => f.size <= MAX_BYTES);
+        if (!accepted.length) { input.remove(); return; }
+        const readAsB64 = (f) => new Promise((resolve) => {
           const reader = new FileReader();
           reader.onload = () => {
             const result = typeof reader.result === "string" ? reader.result : "";
             const comma = result.indexOf(",");
             const b64 = comma >= 0 ? result.slice(comma + 1) : result;
-            // Stable id per file name — re-uploading same name replaces the
-            // previous load instead of duplicating in the scene.
-            const id = "user_scene_" + f.name.replace(/[^a-zA-Z0-9_]/g, "_");
-            resolve({
-              id,
-              name: f.name,
-              format: fmt,
-              data: b64,
-              colorHint: "user_import",  // distinct dot in iframe Object List
-            });
+            resolve(b64);
           };
           reader.onerror = (e) => { console.warn("[PAL comfy] scene reader error:", f.name, e); resolve(null); };
           reader.readAsDataURL(f);
-        }));
-        const uploaded = (await Promise.all(readers)).filter(Boolean);
+        });
+        // Pull bytes for everything in one parallel batch.
+        const allRead = await Promise.all(
+          accepted.map(async (f) => ({
+            file: f,
+            data: await readAsB64(f),
+            mime: f.type || "application/octet-stream",
+          }))
+        );
+        const valid = allRead.filter((r) => r.data);
+        // Split into primary models vs resources.
+        const primaries = valid.filter((r) => !isResource(r.file.name));
+        const resources = valid
+          .filter((r) => isResource(r.file.name))
+          .map((r) => ({ name: r.file.name, mime: r.mime, data: r.data }));
+        if (!primaries.length) {
+          if (resources.length) {
+            alert(
+              "No 3D model files in this pick — only sidecar resources " +
+              "(.bin / textures / .mtl). Pick a .glb / .gltf / .obj / .fbx " +
+              "TOGETHER with its sidecars next time.\n\n" +
+              "Tip: in the file dialog, hold Ctrl (or Cmd on Mac) to " +
+              "multi-select the .gltf + its .bin + any textures all at once."
+            );
+          }
+          input.remove();
+          return;
+        }
+        const uploaded = primaries.map((r) => {
+          const fmt = formatFor(r.file.name);
+          // Stable id per file name — re-uploading same name replaces.
+          const id = "user_scene_" + r.file.name.replace(/[^a-zA-Z0-9_]/g, "_");
+          return {
+            id,
+            name: r.file.name,
+            format: fmt,
+            data: r.data,
+            // Bundle all picked resources onto every primary model so a
+            // shared .bin / texture set works even if the user picked two
+            // .gltfs that reference the same buffer file.
+            resources: resources.length ? resources.slice() : undefined,
+            colorHint: "user_import",  // distinct dot in iframe Object List
+          };
+        });
         if (!uploaded.length) { input.remove(); return; }
         // De-dup by id (so re-picking the same file replaces, doesn't dup).
         const byId = new Map((nodeRef._userScenes || []).map((r) => [r.id, r]));
@@ -827,15 +873,17 @@ app.registerExtension({
           const modal = document.getElementById("pal-comfy-modal");
           const iframe = modal?.querySelector("iframe");
           if (iframe?.contentWindow) {
-            // Merge user textures into resources for relative-URI resolution
-            // (matches the on-open merge logic in _openViewport).
+            // Merge user textures (from UPLOAD TEXTURES) on top of any
+            // resources picked alongside the model — both can coexist.
+            // De-dup by filename so a texture in UPLOAD TEXTURES doesn't
+            // double-up if also in the scene pick.
             const models = uploaded.map((u) => {
-              const m = { ...u };
-              if (nodeRef._userTextures?.length) m.resources = [...nodeRef._userTextures];
-              return m;
+              const merged = new Map((u.resources || []).map((r) => [r.name, r]));
+              for (const t of (nodeRef._userTextures || [])) merged.set(t.name, t);
+              return { ...u, resources: [...merged.values()] };
             });
             iframe.contentWindow.postMessage({ type: "pal:load-models", models }, "*");
-            console.log(`[PAL comfy] live-pushed ${models.length} scene model(s) to open iframe`);
+            console.log(`[PAL comfy] live-pushed ${models.length} scene model(s) to open iframe (resources=${resources.length})`);
           }
         } catch (err) { console.warn("[PAL comfy] live scene push failed:", err); }
 
