@@ -1812,15 +1812,20 @@ app.registerExtension({
             if (models.length) {
               iframe.contentWindow.postMessage({ type: "pal:load-models", models }, "*");
             }
-            // IMPORTANT: do NOT send scene.objects back to the iframe.
-            // Models come via pal:load-models (fresh from source) every open;
-            // re-serialising them as "imported_asset" proxies causes
-            // viewer.loadScene to race the async FBX loader and drop a
-            // prop_generic placeholder (tetrahedron) on top of the real mesh.
-            // Only keyframes, settings, and camera system ride along here.
+            // Send scene.objects too — procedural proxies (humans, vehicles,
+            // props, etc.) have no bytes path, they're built sync from
+            // proxy_type. Without them in pal:load-state the iframe's
+            // viewport comes back empty after workflow reopen.
+            // The iframe's pal:load-state handler filters imported_* before
+            // calling viewer.loadScene, so the historical race-condition
+            // concern (proxies racing the async FBX/GLTF loader from
+            // pal:load-models) is handled at the consumer.
             const loadStatePayload = { scene: {}, settings: savedSettings, cameraSystem: savedCameraSystem };
             if (savedScene?.keyframes) loadStatePayload.scene.keyframes = savedScene.keyframes;
-            if (loadStatePayload.scene.keyframes || savedSettings || savedCameraSystem) {
+            if (Array.isArray(savedScene?.objects) && savedScene.objects.length) {
+              loadStatePayload.scene.objects = savedScene.objects;
+            }
+            if (loadStatePayload.scene.keyframes || loadStatePayload.scene.objects || savedSettings || savedCameraSystem) {
               iframe.contentWindow.postMessage({ type: "pal:load-state", state: loadStatePayload }, "*");
             }
             if (savedCamera && (savedCamera.position || savedCamera.quaternion)) {
