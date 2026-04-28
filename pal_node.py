@@ -161,7 +161,8 @@ class PALNode:
             # we don't end up with a 512×288 beauty next to a 512×512 normal.
             # Beauty tensor shape is (1, H, W, 3).
             try:
-                _bh = int(beauty.shape[1]); _bw = int(beauty.shape[2])
+                _bh = int(beauty.shape[1])
+                _bw = int(beauty.shape[2])
             except Exception:
                 _bh, _bw = render_height, render_width
             depth = self._decode_pass(state.get("depth_b64"), _bw, _bh, channels=1) if has_multipass else self._blank(_bw, _bh, 1)
