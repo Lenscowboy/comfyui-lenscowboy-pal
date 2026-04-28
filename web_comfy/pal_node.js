@@ -354,12 +354,90 @@ function _palPatchGraphToPrompt() {
   console.log("[PAL comfy] app.graphToPrompt patched for PAL pass injection");
 }
 
+// ── One-time legacy bloat sweep of Comfy.Workflow.Drafts ──────────────
+// Pre-fix workflows saved render passes (beauty_b64 etc) and user-uploaded
+// scene bytes inside the _pal_scene_state widget value. Once that bloat is
+// in localStorage["Comfy.Workflow.Drafts"], every subsequent autosave fails
+// QuotaExceededError. The per-node migration in onNodeCreated only fixes
+// the LIVE _palState; the localStorage draft snapshot is independent and
+// stays bloated until something rewrites it. This sweep walks every draft,
+// strips legacy bloat from PAL nodes' widget values, and writes the
+// cleaned blob back — once per ComfyUI start.
+function _palSweepLegacyDrafts() {
+  const KEY = "Comfy.Workflow.Drafts";
+  const PASS_FIELDS = ["beauty_b64", "depth_b64", "normal_b64", "alpha_b64", "id_matte_b64"];
+  let raw;
+  try { raw = localStorage.getItem(KEY); } catch { return; }
+  if (!raw) return;
+  const beforeBytes = raw.length;
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return; }
+  let touched = false;
+  const cleanWidgetValue = (val) => {
+    if (typeof val !== "string" || val.length < 50) return { v: val, changed: false };
+    let obj;
+    try { obj = JSON.parse(val); } catch { return { v: val, changed: false }; }
+    if (!obj || typeof obj !== "object") return { v: val, changed: false };
+    let dirty = false;
+    for (const f of PASS_FIELDS) {
+      if (obj[f]) { delete obj[f]; dirty = true; }
+    }
+    if (Array.isArray(obj._userScenes)) { delete obj._userScenes; dirty = true; }
+    if (!dirty) return { v: val, changed: false };
+    return { v: JSON.stringify(obj), changed: true };
+  };
+  const walkNodes = (nodes) => {
+    if (!Array.isArray(nodes)) return;
+    for (const n of nodes) {
+      if (!n || n.type !== "PALLayoutNode") continue;
+      // ComfyUI workflows store widget values either as a positional array
+      // (widgets_values) or as named entries — handle both. Names have to
+      // match python INPUT_TYPES order so we use the legacy positional too.
+      if (Array.isArray(n.widgets_values)) {
+        for (let i = 0; i < n.widgets_values.length; i++) {
+          const r = cleanWidgetValue(n.widgets_values[i]);
+          if (r.changed) { n.widgets_values[i] = r.v; touched = true; }
+        }
+      }
+      // properties._pal_state_backup — defensive, mirrors widget value
+      if (n.properties && typeof n.properties._pal_state_backup === "string") {
+        const r = cleanWidgetValue(n.properties._pal_state_backup);
+        if (r.changed) { n.properties._pal_state_backup = r.v; touched = true; }
+      }
+    }
+  };
+  // Drafts can be: array of {workflow}, object keyed by id → {workflow}, or
+  // a single workflow. Walk defensively.
+  const visit = (entry) => {
+    if (!entry) return;
+    if (entry.nodes) walkNodes(entry.nodes);
+    if (entry.workflow?.nodes) walkNodes(entry.workflow.nodes);
+  };
+  if (Array.isArray(parsed)) parsed.forEach(visit);
+  else if (parsed && typeof parsed === "object") {
+    if (Array.isArray(parsed.nodes)) walkNodes(parsed.nodes);
+    Object.values(parsed).forEach(visit);
+  }
+  if (!touched) return;
+  try {
+    const out = JSON.stringify(parsed);
+    localStorage.setItem(KEY, out);
+    console.log(`[PAL comfy] swept Comfy.Workflow.Drafts: ${beforeBytes} → ${out.length} bytes`);
+  } catch (err) {
+    // Set still failed even after stripping → drafts are too big from
+    // OTHER content. Last-resort: clear entirely so user is unblocked.
+    console.warn("[PAL comfy] sweep set failed, clearing drafts entirely:", err);
+    try { localStorage.removeItem(KEY); } catch {}
+  }
+}
+
 app.registerExtension({
   name: EXT_NAME,
   async setup() {
-    // Patch happens once at extension setup. setup() is called by ComfyUI
-    // after app finishes initializing, so app.graphToPrompt is guaranteed
-    // to exist here.
+    // Order matters: sweep BEFORE patching graphToPrompt. Sweep cleans
+    // existing localStorage so Comfy's reactive autosave can succeed on
+    // load; patch handles the per-queue inject/restore going forward.
+    _palSweepLegacyDrafts();
     _palPatchGraphToPrompt();
   },
 
