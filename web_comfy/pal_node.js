@@ -523,6 +523,61 @@ app.registerExtension({
           }
         }
       } catch (_) { /* defensive — non-fatal */ }
+
+      // Async hydration of _userScenes + _userTextures + render-pass
+      // presence from IndexedDB. MUST run post-super here (not in
+      // onNodeCreated) because LiteGraph applies the saved
+      // node.properties.palAssetUuid as part of configure(); only after
+      // super has the IDB key matched what was used at upload time.
+      // Earlier this block lived in onNodeCreated and queried a
+      // fresh-generated UUID with no entries → user-loaded scenes /
+      // textures evaporated on reopen.
+      const _hydrateUuid = _palAssetUuidFor(this);
+      const nodeRef = this;
+      (async () => {
+        try {
+          const [scenes, textures, passes] = await Promise.all([
+            _palDBGetAllForNodeKind(_hydrateUuid, "scene"),
+            _palDBGetAllForNodeKind(_hydrateUuid, "texture"),
+            _palDBGetAllForNodeKind(_hydrateUuid, "pass"),
+          ]);
+          if (passes.some((p) => p.data && p.data.length > 100)) {
+            nodeRef._palRendered = true;
+            console.log("[PAL comfy] hydrated _palRendered=true from IDB passes");
+          }
+          if (scenes.length) {
+            nodeRef._userScenes = scenes.map((row) => ({
+              id: "user_scene_" + row.name.replace(/[^a-zA-Z0-9_]/g, "_"),
+              name: row.name,
+              format: row.format,
+              data: row.data,
+              resources: row.resources || undefined,
+              colorHint: row.colorHint || "user_import",
+            }));
+            if (nodeRef._sceneBtnEl) {
+              nodeRef._sceneBtnEl.textContent = `LOAD 3D SCENE (${nodeRef._userScenes.length})`;
+            }
+            console.log(`[PAL comfy] hydrated ${nodeRef._userScenes.length} scene(s) from IDB (uuid=${_hydrateUuid.slice(0, 8)})`);
+          }
+          if (textures.length) {
+            nodeRef._userTextures = textures.map((row) => ({
+              name: row.name,
+              mime: row.mime || "application/octet-stream",
+              data: row.data,
+            }));
+            if (nodeRef._texBtnEl) {
+              nodeRef._texBtnEl.textContent = `UPLOAD TEXTURES (${nodeRef._userTextures.length})`;
+            }
+            console.log(`[PAL comfy] hydrated ${nodeRef._userTextures.length} texture(s) from IDB`);
+          }
+          if (scenes.length || textures.length) {
+            nodeRef._updateSummary?.();
+            app.graph?.setDirtyCanvas?.(true);
+          }
+        } catch (err) {
+          console.warn("[PAL comfy] IDB hydration failed:", err);
+        }
+      })();
     };
 
     const origOnCreated = nodeType.prototype.onNodeCreated;
@@ -629,61 +684,6 @@ app.registerExtension({
           console.log("[PAL comfy] migrated legacy passes _palState → IDB; _palState now lean");
         }
       }
-
-      // Async hydration of _userScenes + _userTextures + render-pass
-      // presence from IndexedDB. Fire-and-forget; updates the node state +
-      // button labels when ready. Skipped silently if IDB is unavailable.
-      const _hydrateUuid = _palAssetUuidFor(this);
-      const nodeRef = this;
-      (async () => {
-        try {
-          const [scenes, textures, passes] = await Promise.all([
-            _palDBGetAllForNodeKind(_hydrateUuid, "scene"),
-            _palDBGetAllForNodeKind(_hydrateUuid, "texture"),
-            _palDBGetAllForNodeKind(_hydrateUuid, "pass"),
-          ]);
-          // _palRendered controls the "render passes first" gate in
-          // beforeQueuePrompt. If IDB carries any non-empty pass, the
-          // node was rendered in a prior session — restore the flag so
-          // queueing isn't blocked unnecessarily after a reopen.
-          if (passes.some((p) => p.data && p.data.length > 100)) {
-            nodeRef._palRendered = true;
-            console.log("[PAL comfy] hydrated _palRendered=true from IDB passes");
-          }
-          if (scenes.length) {
-            // Map IDB entry shape → _userScenes shape (matches _pickScene).
-            nodeRef._userScenes = scenes.map((row) => ({
-              id: "user_scene_" + row.name.replace(/[^a-zA-Z0-9_]/g, "_"),
-              name: row.name,
-              format: row.format,
-              data: row.data,
-              resources: row.resources || undefined,
-              colorHint: row.colorHint || "user_import",
-            }));
-            if (nodeRef._sceneBtnEl) {
-              nodeRef._sceneBtnEl.textContent = `LOAD 3D SCENE (${nodeRef._userScenes.length})`;
-            }
-            console.log(`[PAL comfy] hydrated ${nodeRef._userScenes.length} scene(s) from IDB`);
-          }
-          if (textures.length) {
-            nodeRef._userTextures = textures.map((row) => ({
-              name: row.name,
-              mime: row.mime || "application/octet-stream",
-              data: row.data,
-            }));
-            if (nodeRef._texBtnEl) {
-              nodeRef._texBtnEl.textContent = `UPLOAD TEXTURES (${nodeRef._userTextures.length})`;
-            }
-            console.log(`[PAL comfy] hydrated ${nodeRef._userTextures.length} texture(s) from IDB`);
-          }
-          if (scenes.length || textures.length) {
-            nodeRef._updateSummary?.();
-            app.graph?.setDirtyCanvas?.(true);
-          }
-        } catch (err) {
-          console.warn("[PAL comfy] IDB hydration failed:", err);
-        }
-      })();
 
       // Phase 2 session cache
       this._lcSession = null;          // { plan, features, project_list }
