@@ -335,6 +335,16 @@ app.registerExtension({
         }
       }
 
+      // Hydrate _userScenes from _palState if the loaded workflow JSON
+      // carried any. _userScenes was promoted from a per-session cache to
+      // a persisted-via-_palState array so user-uploaded geometry survives
+      // workflow save/reopen — the bytes ride along inside the same widget
+      // value (and properties backup) that handles keyframes.
+      if (Array.isArray(this._palState?._userScenes) && this._palState._userScenes.length) {
+        this._userScenes = this._palState._userScenes;
+        console.log(`[PAL comfy] hydrated ${this._userScenes.length} _userScenes from _palState`);
+      }
+
       // Phase 2 session cache
       this._lcSession = null;          // { plan, features, project_list }
       this._lcBadgeState = "disconnected";
@@ -464,19 +474,72 @@ app.registerExtension({
       });
       this._texBtn.serialize = false;
 
-      // Load 3D Scene — same pattern as UPLOAD TEXTURES but for geometry.
-      // Lets users bring in their own .glb / .gltf / .obj / .fbx without
-      // routing through Comfy's built-in Load 3D node (which crashes on
-      // missing input — see comfy_extras/nodes_load_3d.py:55). The picker
-      // reads each file as base64 and stashes onto _userScenes; on every
-      // iframe open the comfy bridge merges _userScenes into the
-      // pal:load-models payload, so the scene rebuilds reliably across
-      // close → reopen → ComfyUI restart cycles.
-      this._userScenes = [];
-      this._sceneBtn = this.addWidget("button", "LOAD 3D SCENE (0)", "load_3d_scene", () => {
+      // Load 3D Scene — DOM button (matches OPEN VIEWPORT styling) so we
+      // can update the (N) counter live. LiteGraph button labels are
+      // cached on the Vue frontend at creation, so a "LOAD 3D SCENE (1)"
+      // re-label wouldn't repaint there. DOM button text is fully
+      // controlled and updates immediately.
+      //
+      // Files picker: .glb / .gltf / .obj / .fbx, each capped at 100MB
+      // (workflow JSON would balloon otherwise; user gets a warning if
+      // they pick a larger file). Bytes ride along in _palState._user
+      // Scenes which now serializes through the workflow JSON via the
+      // hidden _pal_scene_state widget — so user-uploaded scenes survive
+      // workflow save / close / reopen / ComfyUI restart, not just the
+      // current session.
+      // Don't clobber a hydrated _userScenes from _palState (workflow JSON
+      // round-trip — see hydration block higher up in onNodeCreated).
+      if (!Array.isArray(this._userScenes)) this._userScenes = [];
+      const _sceneBtnEl = document.createElement("button");
+      _sceneBtnEl.type = "button";
+      _sceneBtnEl.textContent = `LOAD 3D SCENE (${this._userScenes.length})`;
+      _sceneBtnEl.style.cssText = [
+        "width:calc(100% - 16px)",
+        "height:32px",
+        "margin:4px 8px",
+        "background:#1a1a18",
+        "border:1px solid rgba(168,85,247,0.5)",
+        "border-radius:4px",
+        "color:#c4b5fd",
+        "font-family:monospace",
+        "font-size:11px",
+        "font-weight:600",
+        "letter-spacing:0.08em",
+        "text-transform:uppercase",
+        "cursor:pointer",
+        "pointer-events:auto",
+        "transition:background 0.12s, border-color 0.12s",
+      ].join(";");
+      _sceneBtnEl.addEventListener("mouseenter", () => {
+        _sceneBtnEl.style.background = "#1f1828";
+        _sceneBtnEl.style.borderColor = "#c4b5fd";
+      });
+      _sceneBtnEl.addEventListener("mouseleave", () => {
+        _sceneBtnEl.style.background = "#1a1a18";
+        _sceneBtnEl.style.borderColor = "rgba(168,85,247,0.5)";
+      });
+      _sceneBtnEl.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
         this._pickScene();
       });
-      this._sceneBtn.serialize = false;
+      this._sceneBtnEl = _sceneBtnEl;
+      if (typeof this.addDOMWidget === "function") {
+        const sceneWidget = this.addDOMWidget("load_3d_scene", "div", _sceneBtnEl, {
+          serialize: false,
+          hideOnZoom: false,
+          getValue: () => "",
+          setValue: () => {},
+          getHeight: () => 40,
+        });
+        if (sceneWidget) sceneWidget.computeSize = () => [0, 40];
+      } else {
+        // Fallback for older LiteGraph builds.
+        this._sceneBtn = this.addWidget("button", "LOAD 3D SCENE (0)", "load_3d_scene", () => {
+          this._pickScene();
+        });
+        this._sceneBtn.serialize = false;
+      }
 
       // Scene summary widget (read-only text)
       this._summaryWidget = this.addWidget("text", "scene_summary", "No scene loaded", () => {}, {
@@ -622,9 +685,15 @@ app.registerExtension({
     /* ── Load 3D Scene picker — sibling of _pickTextures ───────── */
     // Accepts the usual formats the iframe's pal:load-models handler knows
     // about: .glb, .gltf, .obj, .fbx. Each file is read as base64 and pushed
-    // onto _userScenes with {id, name, format, data} — the iframe-open path
-    // already merges this into the pal:load-models payload alongside
-    // upstream-node models, glb_path, and saved-state models.
+    // onto _userScenes (mirrored on _palState._userScenes for workflow JSON
+    // persistence). On every iframe open the comfy bridge merges _userScenes
+    // into the pal:load-models payload alongside upstream-node models,
+    // glb_path, and saved-state models.
+    //
+    // Cap: 100MB per file. Larger files trigger an alert + skip — embedding
+    // a 500MB glb in workflow JSON is fine in theory but ruinous in practice
+    // (load times, copy-paste, file size). User can still drop the bigger
+    // model into the iframe's drag-drop or convert / decimate first.
     //
     // Multi-file gltf+textures: textures should also be uploaded via UPLOAD
     // TEXTURES — the iframe's LoadingManager URL modifier resolves them by
@@ -632,6 +701,7 @@ app.registerExtension({
     nodeType.prototype._pickScene = function () {
       console.log("[PAL comfy] _pickScene called");
       const nodeRef = this;
+      const MAX_BYTES = 100 * 1024 * 1024;
       const input = document.createElement("input");
       input.type = "file";
       input.multiple = true;
@@ -646,9 +716,24 @@ app.registerExtension({
           const m = (name || "").toLowerCase().match(/\.(glb|gltf|obj|fbx)$/);
           return m ? m[1] : "";
         };
-        const readers = files.map((f) => new Promise((resolve) => {
+        // Pre-screen for oversized files — show the user EVERY rejection in
+        // one alert rather than nagging them per-file.
+        const oversized = files.filter((f) => f.size > MAX_BYTES);
+        if (oversized.length) {
+          const lines = oversized.map((f) => `  • ${f.name} — ${(f.size / 1048576).toFixed(1)} MB`).join("\n");
+          alert(
+            "These files exceed the 100 MB embed cap and were skipped:\n\n" +
+            lines + "\n\n" +
+            "PAL embeds scene bytes inside the workflow JSON so they survive " +
+            "save/reopen — at >100 MB the workflow file becomes unwieldy. " +
+            "Convert / decimate the model in your DCC, or split into smaller " +
+            "pieces, then re-import."
+          );
+        }
+        const acceptedFiles = files.filter((f) => f.size <= MAX_BYTES && formatFor(f.name));
+        if (!acceptedFiles.length) { input.remove(); return; }
+        const readers = acceptedFiles.map((f) => new Promise((resolve) => {
           const fmt = formatFor(f.name);
-          if (!fmt) { resolve(null); return; }
           const reader = new FileReader();
           reader.onload = () => {
             const result = typeof reader.result === "string" ? reader.result : "";
@@ -657,7 +742,13 @@ app.registerExtension({
             // Stable id per file name — re-uploading same name replaces the
             // previous load instead of duplicating in the scene.
             const id = "user_scene_" + f.name.replace(/[^a-zA-Z0-9_]/g, "_");
-            resolve({ id, name: f.name, format: fmt, data: b64 });
+            resolve({
+              id,
+              name: f.name,
+              format: fmt,
+              data: b64,
+              colorHint: "user_import",  // distinct dot in iframe Object List
+            });
           };
           reader.onerror = (e) => { console.warn("[PAL comfy] scene reader error:", f.name, e); resolve(null); };
           reader.readAsDataURL(f);
@@ -668,6 +759,16 @@ app.registerExtension({
         const byId = new Map((nodeRef._userScenes || []).map((r) => [r.id, r]));
         for (const u of uploaded) byId.set(u.id, u);
         nodeRef._userScenes = [...byId.values()];
+
+        // Persist into _palState so workflow JSON save round-trips the
+        // bytes — without this, _userScenes would be a per-session cache
+        // only (UPLOAD TEXTURES behaviour). The hidden _pal_scene_state
+        // widget already writes through to JSON; properties._pal_state_
+        // backup mirrors it. Both pick this up automatically.
+        nodeRef._palState = nodeRef._palState || {};
+        nodeRef._palState._userScenes = nodeRef._userScenes;
+        const stateWidget = nodeRef.widgets?.find(w => w.name === "_pal_scene_state");
+        if (stateWidget) stateWidget.value = JSON.stringify(nodeRef._palState);
 
         // If iframe is currently open, push the new models live so the user
         // sees them appear without having to re-open the modal.
@@ -687,6 +788,10 @@ app.registerExtension({
           }
         } catch (err) { console.warn("[PAL comfy] live scene push failed:", err); }
 
+        // Refresh button label (DOM widget — Vue cache doesn't apply).
+        if (nodeRef._sceneBtnEl) {
+          nodeRef._sceneBtnEl.textContent = `LOAD 3D SCENE (${nodeRef._userScenes.length})`;
+        }
         nodeRef._updateSummary?.();
         app.graph?.setDirtyCanvas?.(true);
         console.log(`[PAL comfy] User scenes now: ${nodeRef._userScenes.length}`);
