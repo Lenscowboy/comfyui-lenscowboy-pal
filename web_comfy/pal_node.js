@@ -23,6 +23,83 @@ const BADGE = {
   partial:      { label: "[ LC \u2191 ]",  color: "#f5a623" },
 };
 
+/* \u2500\u2500 IndexedDB asset cache \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+ * User-uploaded textures and 3D scenes can be many MB each \u2014 too big
+ * to ride along in workflow JSON without blowing Comfy's autosave
+ * localStorage cap. IDB is per-origin (~50% disk quota), async, and
+ * never touches workflow JSON. Keyed by a stable per-node UUID stashed
+ * in node.properties.palAssetUuid (round-trips through workflow JSON,
+ * so the same node after save/reload finds the same entries). */
+const _PAL_DB_NAME = "pal_comfy_assets";
+const _PAL_DB_STORE = "assets";
+const _PAL_DB_VERSION = 1;
+let _palDBPromise = null;
+
+function _palOpenDB() {
+  if (_palDBPromise) return _palDBPromise;
+  _palDBPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") { reject(new Error("IndexedDB unavailable")); return; }
+    const req = indexedDB.open(_PAL_DB_NAME, _PAL_DB_VERSION);
+    req.onupgradeneeded = (ev) => {
+      const db = ev.target.result;
+      if (!db.objectStoreNames.contains(_PAL_DB_STORE)) db.createObjectStore(_PAL_DB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return _palDBPromise;
+}
+
+async function _palDBPut(nodeUuid, kind, name, value) {
+  if (!nodeUuid) return;
+  try {
+    const db = await _palOpenDB();
+    const key = `${nodeUuid}__${kind}__${name}`;
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(_PAL_DB_STORE, "readwrite");
+      tx.objectStore(_PAL_DB_STORE).put({ nodeUuid, kind, name, ...value, ts: Date.now() }, key);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) { console.warn("[PAL comfy] IDB put failed:", err); }
+}
+
+async function _palDBGetAllForNodeKind(nodeUuid, kind) {
+  if (!nodeUuid) return [];
+  try {
+    const db = await _palOpenDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(_PAL_DB_STORE, "readonly");
+      const store = tx.objectStore(_PAL_DB_STORE);
+      const range = IDBKeyRange.bound(`${nodeUuid}__${kind}__`, `${nodeUuid}__${kind}__\uffff`);
+      const out = [];
+      const req = store.openCursor(range);
+      req.onsuccess = (ev) => {
+        const cursor = ev.target.result;
+        if (cursor) { out.push(cursor.value); cursor.continue(); }
+        else resolve(out);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) { console.warn("[PAL comfy] IDB getAll failed:", err); return []; }
+}
+
+function _palAssetUuidFor(node) {
+  // Stable per-node UUID stored in node.properties so it round-trips
+  // through workflow JSON. Generated on first call. Copy/paste duplicates
+  // share UUID until LiteGraph assigns fresh properties (rare in practice \u2014
+  // user can clear via dev tools if assets cross-pollinate).
+  if (!node) return "";
+  if (!node.properties) node.properties = {};
+  if (!node.properties.palAssetUuid) {
+    const rand = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2) + Date.now().toString(36);
+    node.properties.palAssetUuid = rand;
+  }
+  return node.properties.palAssetUuid;
+}
+
 /* ── Feature helpers ─────────────────────────────────────────────── */
 const FREE_FEATURES = new Set(["viewport", "beauty_512"]);
 
@@ -335,20 +412,65 @@ app.registerExtension({
         }
       }
 
-      // _userScenes is session-only — see _pickScene for rationale (size
-      // would blow Comfy's workflow-draft localStorage cap). Defensive
-      // cleanup: if a previous version of this node DID embed scene bytes
-      // into _palState, strip them out so the autosave succeeds. Without
-      // this purge, users who hit the bug once would have a corrupted
-      // _palState in their workflow JSON / properties backup that keeps
-      // re-failing autosave on every reopen.
+      // Defensive: if an earlier broken version of this node embedded
+      // scene bytes into _palState, strip them out — those would re-fail
+      // workflow draft autosave forever. New persistence path is
+      // IndexedDB (loaded async below), so _palState should never carry
+      // _userScenes again.
       if (this._palState && Array.isArray(this._palState._userScenes)) {
         const purged = this._palState._userScenes.length;
         delete this._palState._userScenes;
         const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
         if (widget) widget.value = JSON.stringify(this._palState);
-        console.log(`[PAL comfy] purged ${purged} legacy _userScenes from _palState (now session-only)`);
+        console.log(`[PAL comfy] purged ${purged} legacy _userScenes from _palState (moved to IDB)`);
       }
+
+      // Async hydration of _userScenes + _userTextures from IndexedDB.
+      // Fire-and-forget; updates the node state + button labels when
+      // ready. Skipped silently if IDB is unavailable or no entries
+      // for this node UUID.
+      const _hydrateUuid = _palAssetUuidFor(this);
+      const nodeRef = this;
+      (async () => {
+        try {
+          const [scenes, textures] = await Promise.all([
+            _palDBGetAllForNodeKind(_hydrateUuid, "scene"),
+            _palDBGetAllForNodeKind(_hydrateUuid, "texture"),
+          ]);
+          if (scenes.length) {
+            // Map IDB entry shape → _userScenes shape (matches _pickScene).
+            nodeRef._userScenes = scenes.map((row) => ({
+              id: "user_scene_" + row.name.replace(/[^a-zA-Z0-9_]/g, "_"),
+              name: row.name,
+              format: row.format,
+              data: row.data,
+              resources: row.resources || undefined,
+              colorHint: row.colorHint || "user_import",
+            }));
+            if (nodeRef._sceneBtnEl) {
+              nodeRef._sceneBtnEl.textContent = `LOAD 3D SCENE (${nodeRef._userScenes.length})`;
+            }
+            console.log(`[PAL comfy] hydrated ${nodeRef._userScenes.length} scene(s) from IDB`);
+          }
+          if (textures.length) {
+            nodeRef._userTextures = textures.map((row) => ({
+              name: row.name,
+              mime: row.mime || "application/octet-stream",
+              data: row.data,
+            }));
+            if (nodeRef._texBtnEl) {
+              nodeRef._texBtnEl.textContent = `UPLOAD TEXTURES (${nodeRef._userTextures.length})`;
+            }
+            console.log(`[PAL comfy] hydrated ${nodeRef._userTextures.length} texture(s) from IDB`);
+          }
+          if (scenes.length || textures.length) {
+            nodeRef._updateSummary?.();
+            app.graph?.setDirtyCanvas?.(true);
+          }
+        } catch (err) {
+          console.warn("[PAL comfy] IDB hydration failed:", err);
+        }
+      })();
 
       // Phase 2 session cache
       this._lcSession = null;          // { plan, features, project_list }
@@ -711,6 +833,14 @@ app.registerExtension({
         const byName = new Map((nodeRef._userTextures || []).map((r) => [r.name, r]));
         for (const u of uploaded) byName.set(u.name, u);
         nodeRef._userTextures = [...byName.values()];
+        // Persist textures to IndexedDB (same path as _pickScene).
+        const _uuidT = _palAssetUuidFor(nodeRef);
+        for (const u of uploaded) {
+          _palDBPut(_uuidT, "texture", u.name, {
+            mime: u.mime || "application/octet-stream",
+            data: u.data,
+          });
+        }
         // Refresh DOM button label (Vue cache doesn't apply to DOM widgets).
         if (nodeRef._texBtnEl) {
           nodeRef._texBtnEl.textContent = `UPLOAD TEXTURES (${nodeRef._userTextures.length})`;
@@ -757,7 +887,6 @@ app.registerExtension({
     nodeType.prototype._pickScene = function () {
       console.log("[PAL comfy] _pickScene called");
       const nodeRef = this;
-      const MAX_BYTES = 100 * 1024 * 1024;
       const input = document.createElement("input");
       input.type = "file";
       input.multiple = true;
@@ -790,22 +919,11 @@ app.registerExtension({
           // LoadingManager picks these up via the URL modifier.
           return !formatFor(name);
         };
-        // Pre-screen for oversized files — show the user EVERY rejection in
-        // one alert rather than nagging them per-file.
-        const oversized = files.filter((f) => f.size > MAX_BYTES);
-        if (oversized.length) {
-          const lines = oversized.map((f) => `  • ${f.name} — ${(f.size / 1048576).toFixed(1)} MB`).join("\n");
-          alert(
-            "These files exceed the 100 MB embed cap and were skipped:\n\n" +
-            lines + "\n\n" +
-            "PAL embeds scene bytes inside the workflow JSON so they survive " +
-            "save/reopen — at >100 MB the workflow file becomes unwieldy. " +
-            "Convert / decimate the model in your DCC, or split into smaller " +
-            "pieces, then re-import."
-          );
-        }
-        const accepted = files.filter((f) => f.size <= MAX_BYTES);
-        if (!accepted.length) { input.remove(); return; }
+        // No size cap — scene bytes go to IndexedDB (per-origin quota
+        // is ~50% of free disk, gigabytes), not workflow JSON. Browser
+        // handles its own quota limit and we surface the error if a
+        // truly absurd file pushes us over.
+        const accepted = files;
         const readAsB64 = (f) => new Promise((resolve) => {
           const reader = new FileReader();
           reader.onload = () => {
@@ -866,15 +984,20 @@ app.registerExtension({
         for (const u of uploaded) byId.set(u.id, u);
         nodeRef._userScenes = [...byId.values()];
 
-        // Session-only — do NOT embed scene bytes into _palState. Comfy's
-        // workflow-draft autosave writes the workflow JSON to localStorage,
-        // which caps at ~5-10MB per origin. A single moderate .glb in
-        // base64 blows the cap and triggers "failed to save workflow
-        // draft" errors that block ALL further autosaves (including
-        // keyframes). Same trade-off UPLOAD TEXTURES makes: bytes live
-        // on the node instance until ComfyUI restart; user re-imports
-        // afterwards. If a future commit adds IndexedDB persistence the
-        // _userScenes can live there without the workflow-JSON size hit.
+        // Persist scene bytes to IndexedDB — per-origin quota covers
+        // gigabytes, doesn't touch workflow JSON, survives ComfyUI restart.
+        // Fire-and-forget; failure logs but doesn't block the user (the
+        // session-level _userScenes stash still works for the current run).
+        const _uuid = _palAssetUuidFor(nodeRef);
+        for (const u of uploaded) {
+          _palDBPut(_uuid, "scene", u.name, {
+            format: u.format,
+            data: u.data,
+            mime: "application/octet-stream",
+            colorHint: u.colorHint,
+            resources: u.resources || null,
+          });
+        }
 
         // If iframe is currently open, push the new models live so the user
         // sees them appear without having to re-open the modal.
