@@ -425,18 +425,26 @@ app.registerExtension({
         console.log(`[PAL comfy] purged ${purged} legacy _userScenes from _palState (moved to IDB)`);
       }
 
-      // Async hydration of _userScenes + _userTextures from IndexedDB.
-      // Fire-and-forget; updates the node state + button labels when
-      // ready. Skipped silently if IDB is unavailable or no entries
-      // for this node UUID.
+      // Async hydration of _userScenes + _userTextures + render-pass
+      // presence from IndexedDB. Fire-and-forget; updates the node state +
+      // button labels when ready. Skipped silently if IDB is unavailable.
       const _hydrateUuid = _palAssetUuidFor(this);
       const nodeRef = this;
       (async () => {
         try {
-          const [scenes, textures] = await Promise.all([
+          const [scenes, textures, passes] = await Promise.all([
             _palDBGetAllForNodeKind(_hydrateUuid, "scene"),
             _palDBGetAllForNodeKind(_hydrateUuid, "texture"),
+            _palDBGetAllForNodeKind(_hydrateUuid, "pass"),
           ]);
+          // _palRendered controls the "render passes first" gate in
+          // beforeQueuePrompt. If IDB carries any non-empty pass, the
+          // node was rendered in a prior session — restore the flag so
+          // queueing isn't blocked unnecessarily after a reopen.
+          if (passes.some((p) => p.data && p.data.length > 100)) {
+            nodeRef._palRendered = true;
+            console.log("[PAL comfy] hydrated _palRendered=true from IDB passes");
+          }
           if (scenes.length) {
             // Map IDB entry shape → _userScenes shape (matches _pickScene).
             nodeRef._userScenes = scenes.map((row) => ({
@@ -1480,26 +1488,45 @@ app.registerExtension({
           _palWriteCache(this);
         }
         if (msg.type === "pal:render") {
-          // Do not gate passes client-side. Server-side pal_node.execute()
-          // already blanks depth/normal/alpha for free-tier plans via
-          // has_multipass = plan != "free". A client gate here was
-          // unreliable — _lcSession is async and reads null if the handler
-          // fires before /pal/session resolves, causing spurious upgrade
-          // modals for enterprise users.
-          this._palState.beauty_b64   = msg.beauty;
-          this._palState.depth_b64    = msg.depth   || "";
-          this._palState.normal_b64   = msg.normals || "";
-          this._palState.alpha_b64    = msg.alpha   || "";
-          this._palState.id_matte_b64 = msg.matte   || "";
+          // Render passes (multi-MB each) go to IndexedDB instead of
+          // _palState. Comfy's workflow autosave writes the widget value
+          // to localStorage on every change (~5-10MB cap per origin); a
+          // single beauty pass at full res can blow the cap on its own,
+          // failing all subsequent autosaves. Passes hit the widget value
+          // ONLY at queue time (beforeQueuePrompt), then get stripped on
+          // next tick so autosave only ever sees the lean state.
+          // Do not gate passes client-side — server-side pal_node.execute()
+          // already blanks depth/normal/alpha for free-tier plans.
+          const _passUuid = _palAssetUuidFor(this);
+          const _passEntries = [
+            ["beauty",   msg.beauty   || ""],
+            ["depth",    msg.depth    || ""],
+            ["normal",   msg.normals  || ""],
+            ["alpha",    msg.alpha    || ""],
+            ["id_matte", msg.matte    || ""],
+          ];
+          for (const [kind, data] of _passEntries) {
+            if (data) _palDBPut(_passUuid, "pass", kind, { data });
+            // No data = clear any stale entry from a prior render so the
+            // queue doesn't pick up yesterday's depth pass.
+            else _palDBPut(_passUuid, "pass", kind, { data: "" });
+          }
           this._palRendered = true;
-          // Flush to the hidden widget immediately so the queue reads current
-          // state even if the user queues without re-entering the modal.
-          // Also mirror to localStorage cache (6c safety net).
+          // Make sure no legacy in-memory b64 lingers on _palState — those
+          // would still bloat the widget value next flush.
+          delete this._palState.beauty_b64;
+          delete this._palState.depth_b64;
+          delete this._palState.normal_b64;
+          delete this._palState.alpha_b64;
+          delete this._palState.id_matte_b64;
+          // Flush LEAN _palState (no passes) to the hidden widget so save/
+          // autosave stays small. beforeQueuePrompt re-injects passes
+          // momentarily for the queue itself.
           const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
           const stateJson = JSON.stringify(this._palState || {});
           if (widget) {
             widget.value = stateJson;
-            console.log(`[PAL comfy] pal:render — flushed state to widget (${stateJson.length} bytes, beauty=${this._palState.beauty_b64 ? "yes" : "no"})`);
+            console.log(`[PAL comfy] pal:render — passes → IDB; widget=${stateJson.length} bytes (lean)`);
           } else {
             console.warn(`[PAL comfy] pal:render — _pal_scene_state widget not found; widgets=`, this.widgets?.map(w => w.name));
           }
@@ -1789,17 +1816,39 @@ app.registerExtension({
   async beforeQueuePrompt(graph) {
     const palNodes = graph._nodes?.filter(n => n.type === "PALLayoutNode") || [];
     for (const node of palNodes) {
-      // Flush the latest _palState into the hidden widget on every queue.
-      // Otherwise users who render via the iframe dialog and queue without
-      // clicking "Save & Close" get stale/empty widget content, execute()
-      // decodes blanks, and Video Combine sees nothing.
+      // Flush the latest _palState into the hidden widget — pull render
+      // passes back in from IDB FOR THIS QUEUE ONLY, then strip on the
+      // next tick so autosave doesn't carry the bloat. Comfy reads the
+      // widget value synchronously when building the prompt payload, so
+      // the strip is safe to fire immediately after.
       const widget = node.widgets?.find(w => w.name === "_pal_scene_state");
-      const stateJson = JSON.stringify(node._palState || {});
-      if (widget) {
-        widget.value = stateJson;
-        console.log(`[PAL comfy] beforeQueuePrompt — flushed (${stateJson.length} bytes, beauty=${node._palState?.beauty_b64 ? "yes" : "no"}, rendered=${node._palRendered})`);
-      } else {
+      if (!widget) {
         console.warn(`[PAL comfy] beforeQueuePrompt — _pal_scene_state widget not found; widgets=`, node.widgets?.map(w => w.name));
+      } else {
+        const _qUuid = _palAssetUuidFor(node);
+        const passRows = await _palDBGetAllForNodeKind(_qUuid, "pass").catch(() => []);
+        const passMap = new Map(passRows.map((r) => [r.name, r.data || ""]));
+        const fullState = {
+          ...(node._palState || {}),
+          beauty_b64:   passMap.get("beauty")   || "",
+          depth_b64:    passMap.get("depth")    || "",
+          normal_b64:   passMap.get("normal")   || "",
+          alpha_b64:    passMap.get("alpha")    || "",
+          id_matte_b64: passMap.get("id_matte") || "",
+        };
+        const fullJson = JSON.stringify(fullState);
+        widget.value = fullJson;
+        console.log(`[PAL comfy] beforeQueuePrompt — injected passes (${fullJson.length} bytes, rendered=${node._palRendered})`);
+        // Restore lean widget on next tick — Comfy's prompt builder reads
+        // synchronously after this method returns; the macro task scheduled
+        // here fires after that read, before any autosave.
+        const leanJson = JSON.stringify(node._palState || {});
+        setTimeout(() => {
+          if (widget.value === fullJson) {
+            widget.value = leanJson;
+            console.log(`[PAL comfy] post-queue — widget restored to lean (${leanJson.length} bytes)`);
+          }
+        }, 0);
       }
       _palWriteCache(node);
 
