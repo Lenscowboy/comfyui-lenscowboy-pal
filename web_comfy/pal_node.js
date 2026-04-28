@@ -486,15 +486,41 @@ app.registerExtension({
     const origOnConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function (o) {
       origOnConfigure?.apply(this, arguments);
-      // If the widget value came back empty after JSON load, fall back to
-      // properties._pal_state_backup. Stash on this._palStateFromConfigure
-      // for onNodeCreated to consume — onConfigure runs before onNodeCreated
-      // when loading a workflow, so direct widget mutation here would be
-      // overwritten by the auto-create flow.
+      // Re-hydrate _palState NOW (post-super) — by this point LiteGraph
+      // has applied the saved widgets_values, so widget.value carries the
+      // full state (scene.objects + keyframes + camera + cameraSystem).
+      // onNodeCreated runs BEFORE this and only sees the default "{}" so
+      // its earlier hydration captured nothing. Without this re-read the
+      // in-memory _palState stays empty, the iframe gets an empty
+      // pal:load-state on first open, periodic pal:state push merges
+      // {keyframes: ...} over an empty scene → scene.objects evaporates,
+      // next widget.value flush shrinks to lean → save loses everything.
+      try {
+        const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
+        const v = widget?.value;
+        if (typeof v === "string" && v.length > 2) {
+          const parsed = JSON.parse(v);
+          if (parsed && typeof parsed === "object") {
+            this._palState = parsed;
+            console.log(`[PAL comfy DIAG] onConfigure re-hydrate: scene.objects=${parsed.scene?.objects?.length || 0}, keyframes=${!!parsed.scene?.keyframes}, camera=${!!parsed.camera}, cameraSystem=${!!parsed.cameraSystem}`);
+          }
+        }
+      } catch (err) {
+        console.warn("[PAL comfy] onConfigure re-hydrate failed:", err);
+      }
+      // properties._pal_state_backup as a secondary fallback if widget
+      // value didn't come back (legacy path).
       try {
         const backup = (o && o.properties && o.properties._pal_state_backup) || "";
         if (backup && backup.length > 2) {
           this._palStateFromConfigure = backup;
+          if (!this._palState || Object.keys(this._palState).length === 0) {
+            const parsed = JSON.parse(backup);
+            if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) {
+              this._palState = parsed;
+              console.log(`[PAL comfy] onConfigure recovered _palState from properties._pal_state_backup`);
+            }
+          }
         }
       } catch (_) { /* defensive — non-fatal */ }
     };
