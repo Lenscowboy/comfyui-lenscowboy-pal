@@ -468,11 +468,61 @@ app.registerExtension({
       // UDIM-style tile sets that end up misnamed, etc.). Opens a top-level
       // file picker — works reliably because it runs in ComfyUI's main
       // window, not the cross-origin iframe that blocks showDirectoryPicker.
+      // Upload Textures — DOM button matching OPEN VIEWPORT / LOAD 3D SCENE
+      // sizing. Three CTAs in a column: amber (OPEN), teal (TEXTURES),
+      // violet (SCENE). Same height/font so the row reads as a coherent
+      // toolbar. LiteGraph button replaced because Vue caches its label —
+      // (0)→(N) counter wouldn't repaint.
       this._userTextures = [];
-      this._texBtn = this.addWidget("button", "UPLOAD TEXTURES (0)", "upload_textures", () => {
+      const _texBtnEl = document.createElement("button");
+      _texBtnEl.type = "button";
+      _texBtnEl.textContent = `UPLOAD TEXTURES (${this._userTextures.length})`;
+      _texBtnEl.style.cssText = [
+        "width:calc(100% - 16px)",
+        "height:44px",
+        "margin:6px 8px",
+        "background:#1a1a18",
+        "border:1.5px solid rgba(34,211,238,0.55)",
+        "border-radius:6px",
+        "color:#22d3ee",
+        "font-family:monospace",
+        "font-size:14px",
+        "font-weight:700",
+        "letter-spacing:0.12em",
+        "text-transform:uppercase",
+        "cursor:pointer",
+        "pointer-events:auto",
+        "transition:background 0.12s, border-color 0.12s",
+      ].join(";");
+      _texBtnEl.addEventListener("mouseenter", () => {
+        _texBtnEl.style.background = "#0e2026";
+        _texBtnEl.style.borderColor = "#22d3ee";
+      });
+      _texBtnEl.addEventListener("mouseleave", () => {
+        _texBtnEl.style.background = "#1a1a18";
+        _texBtnEl.style.borderColor = "rgba(34,211,238,0.55)";
+      });
+      _texBtnEl.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
         this._pickTextures();
       });
-      this._texBtn.serialize = false;
+      this._texBtnEl = _texBtnEl;
+      if (typeof this.addDOMWidget === "function") {
+        const texWidget = this.addDOMWidget("upload_textures", "div", _texBtnEl, {
+          serialize: false,
+          hideOnZoom: false,
+          getValue: () => "",
+          setValue: () => {},
+          getHeight: () => 56,
+        });
+        if (texWidget) texWidget.computeSize = () => [0, 56];
+      } else {
+        this._texBtn = this.addWidget("button", "UPLOAD TEXTURES (0)", "upload_textures", () => {
+          this._pickTextures();
+        });
+        this._texBtn.serialize = false;
+      }
 
       // Load 3D Scene — DOM button (matches OPEN VIEWPORT styling) so we
       // can update the (N) counter live. LiteGraph button labels are
@@ -495,16 +545,16 @@ app.registerExtension({
       _sceneBtnEl.textContent = `LOAD 3D SCENE (${this._userScenes.length})`;
       _sceneBtnEl.style.cssText = [
         "width:calc(100% - 16px)",
-        "height:32px",
-        "margin:4px 8px",
+        "height:44px",
+        "margin:6px 8px",
         "background:#1a1a18",
-        "border:1px solid rgba(168,85,247,0.5)",
-        "border-radius:4px",
+        "border:1.5px solid rgba(168,85,247,0.55)",
+        "border-radius:6px",
         "color:#c4b5fd",
         "font-family:monospace",
-        "font-size:11px",
-        "font-weight:600",
-        "letter-spacing:0.08em",
+        "font-size:14px",
+        "font-weight:700",
+        "letter-spacing:0.12em",
         "text-transform:uppercase",
         "cursor:pointer",
         "pointer-events:auto",
@@ -530,9 +580,9 @@ app.registerExtension({
           hideOnZoom: false,
           getValue: () => "",
           setValue: () => {},
-          getHeight: () => 40,
+          getHeight: () => 56,
         });
-        if (sceneWidget) sceneWidget.computeSize = () => [0, 40];
+        if (sceneWidget) sceneWidget.computeSize = () => [0, 56];
       } else {
         // Fallback for older LiteGraph builds.
         this._sceneBtn = this.addWidget("button", "LOAD 3D SCENE (0)", "load_3d_scene", () => {
@@ -656,9 +706,10 @@ app.registerExtension({
         const byName = new Map((nodeRef._userTextures || []).map((r) => [r.name, r]));
         for (const u of uploaded) byName.set(u.name, u);
         nodeRef._userTextures = [...byName.values()];
-        // Vue frontend caches button widget labels at creation — setting
-        // widget.name doesn't repaint. Surface the texture count in the
-        // summary widget instead (which IS reactive to value changes).
+        // Refresh DOM button label (Vue cache doesn't apply to DOM widgets).
+        if (nodeRef._texBtnEl) {
+          nodeRef._texBtnEl.textContent = `UPLOAD TEXTURES (${nodeRef._userTextures.length})`;
+        }
         nodeRef._updateSummary?.();
         app.graph?.setDirtyCanvas?.(true);
         console.log(`[PAL comfy] User textures now: ${nodeRef._userTextures.length}`);
