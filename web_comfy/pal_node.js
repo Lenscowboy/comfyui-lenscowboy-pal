@@ -335,14 +335,19 @@ app.registerExtension({
         }
       }
 
-      // Hydrate _userScenes from _palState if the loaded workflow JSON
-      // carried any. _userScenes was promoted from a per-session cache to
-      // a persisted-via-_palState array so user-uploaded geometry survives
-      // workflow save/reopen — the bytes ride along inside the same widget
-      // value (and properties backup) that handles keyframes.
-      if (Array.isArray(this._palState?._userScenes) && this._palState._userScenes.length) {
-        this._userScenes = this._palState._userScenes;
-        console.log(`[PAL comfy] hydrated ${this._userScenes.length} _userScenes from _palState`);
+      // _userScenes is session-only — see _pickScene for rationale (size
+      // would blow Comfy's workflow-draft localStorage cap). Defensive
+      // cleanup: if a previous version of this node DID embed scene bytes
+      // into _palState, strip them out so the autosave succeeds. Without
+      // this purge, users who hit the bug once would have a corrupted
+      // _palState in their workflow JSON / properties backup that keeps
+      // re-failing autosave on every reopen.
+      if (this._palState && Array.isArray(this._palState._userScenes)) {
+        const purged = this._palState._userScenes.length;
+        delete this._palState._userScenes;
+        const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
+        if (widget) widget.value = JSON.stringify(this._palState);
+        console.log(`[PAL comfy] purged ${purged} legacy _userScenes from _palState (now session-only)`);
       }
 
       // Phase 2 session cache
@@ -861,15 +866,15 @@ app.registerExtension({
         for (const u of uploaded) byId.set(u.id, u);
         nodeRef._userScenes = [...byId.values()];
 
-        // Persist into _palState so workflow JSON save round-trips the
-        // bytes — without this, _userScenes would be a per-session cache
-        // only (UPLOAD TEXTURES behaviour). The hidden _pal_scene_state
-        // widget already writes through to JSON; properties._pal_state_
-        // backup mirrors it. Both pick this up automatically.
-        nodeRef._palState = nodeRef._palState || {};
-        nodeRef._palState._userScenes = nodeRef._userScenes;
-        const stateWidget = nodeRef.widgets?.find(w => w.name === "_pal_scene_state");
-        if (stateWidget) stateWidget.value = JSON.stringify(nodeRef._palState);
+        // Session-only — do NOT embed scene bytes into _palState. Comfy's
+        // workflow-draft autosave writes the workflow JSON to localStorage,
+        // which caps at ~5-10MB per origin. A single moderate .glb in
+        // base64 blows the cap and triggers "failed to save workflow
+        // draft" errors that block ALL further autosaves (including
+        // keyframes). Same trade-off UPLOAD TEXTURES makes: bytes live
+        // on the node instance until ComfyUI restart; user re-imports
+        // afterwards. If a future commit adds IndexedDB persistence the
+        // _userScenes can live there without the workflow-JSON size hit.
 
         // If iframe is currently open, push the new models live so the user
         // sees them appear without having to re-open the modal.
