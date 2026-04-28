@@ -763,7 +763,11 @@ app.registerExtension({
       // up in viewport" case. Bundling resources onto each picked primary
       // model lets the iframe's LoadingManager URL modifier resolve them by
       // filename. Same convention as Comfy's auto-harvest path.
-      input.accept = ".glb,.gltf,.obj,.fbx,.bin,.mtl,image/png,image/jpeg,image/webp,image/bmp";
+      // Extensions only — mixing MIME types here (image/png etc) makes some
+      // Chromium builds pin the picker dropdown to "Image files" and hide
+      // the .glb / .gltf / .fbx entries entirely. Extensions-only keeps the
+      // dialog showing every accepted format.
+      input.accept = ".glb,.gltf,.obj,.fbx,.bin,.mtl,.png,.jpg,.jpeg,.webp,.bmp,.tga";
       input.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0;";
       document.body.appendChild(input);
       const handleChange = async () => {
