@@ -374,6 +374,36 @@ Client-side UI gates exist for UX (show lock icons, suppress obviously-invalid c
 - Output socket names use spaces not underscores (`beauty pass` not `beauty_pass`) — matches the docs aesthetic but means any rename breaks saved workflow wires.
 - Widget default INT values require `{"min": N}` below the desired default; omitting `min` lets ComfyUI send empty strings → Python `int('')` → `ValueError`.
 
+## SaaS-side Drive scope migration (2026-04-28)
+
+The SaaS backend swapped its user-OAuth Drive scope from `auth/drive` (restricted, requires CASA) to `auth/drive.file` (sensitive only, no CASA). Trade-off: under drive.file, the user-OAuth client can ONLY see files IT created or files Picker-opened — SA-uploaded pipeline outputs and user-deposited Drive files become invisible to user-OAuth credentials. Resolution: every Drive **READ** path moved to the service account.
+
+**ComfyUI PAL impact (asset manifest endpoint):**
+
+`GET /pal/comfy/project/{project_id}` in `lenscowboy-pipeline-saas/app/pal_comfy.py` (~L329-L364) builds the asset manifest for a project by listing `*.glb` / `*.gltf` files in the tenant's `source_objects` Drive folder. As of commit `1f12d09` this read goes through `_get_drive_service_sa()` (imported from `app.sheet_create`) instead of the user's OAuth refresh token — necessary because the `source_objects` folder typically holds user-deposited GLBs that user-OAuth drive.file can't see.
+
+```python
+# app/pal_comfy.py — asset manifest fetch
+from app.sheet_create import _get_drive_service_sa
+drive = _get_drive_service_sa()
+result = drive.files().list(
+    q=f"'{objects_folder}' in parents and (name contains '.glb' or name contains '.gltf') and trashed=false",
+    fields="files(id, name, webContentLink)",
+    supportsAllDrives=True,
+).execute()
+```
+
+**Client-side change required: none.** The ComfyUI node continues to call the same endpoint and receives the same response shape (`asset_manifest: [{id, name, glb_url, type}, ...]`). The migration is purely server-side. The SA holds writer on each project folder via `_share_with_service_account` at create time, so permission inheritance covers the whole project tree regardless of which actor uploaded each asset.
+
+**Token-side note (no change, just for orientation):** comfy tokens still carry `kind="comfy"` + a `jti` claim. Revocation = doc delete on `tenants/{tid}/comfy_tokens/{jti}`. Cached 60s per Cloud Run instance. Plan-downgrade enforcement clamps the token's effective plan to `min(baked_plan, current_tenant.plan)` via `_COMFY_PLAN_RANK` in `pal_comfy.py`. None of this is affected by the Drive migration — distinct subsystems.
+
+### Adjacent SaaS changes (2026-04-28)
+
+| Change | Commit | ComfyUI relevance |
+|---|---|---|
+| `GZipMiddleware(minimum_size=1000)` added in `app/main.py` after CORS | `456987d` | Transparent. `requests` and the browser fetch decode gzip automatically. JSON payloads compress 4-5×. No client-side change. |
+| `/pal/drive-thumb` ffmpeg fallback — runs `ffmpeg -frames:v 1` on a range-fetched 25 MB head when Drive returns no `thumbnailLink` (common for SA-owned files) | `d9696d8` | Doesn't affect the comfy node (we don't hit `/pal/drive-thumb` directly), but if a future feature surfaces project assets in the comfy widget, thumbnails for SA-owned GLBs now resolve instead of 404'ing. |
+
 ## Testing
 
 ### Manual
