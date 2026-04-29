@@ -2,6 +2,9 @@
 
 3D previsualisation and spatial layout node for ComfyUI by [LensCowboy](https://lenscowboy.com).
 
+<img width="1024" height="576" alt="comfyPalGif" src="https://github.com/user-attachments/assets/45268975-94be-4094-ba81-4fc7afc24289" />
+
+
 Set up camera angles, position subjects, light your scene, then render beauty, depth, and normal passes directly into your ComfyUI workflow. Feed depth maps to ControlNet, use beauty passes as references, export camera data for consistent shot generation.
 
 ## Features
