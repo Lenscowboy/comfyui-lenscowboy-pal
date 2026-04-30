@@ -337,6 +337,41 @@ function _palPatchGraphToPrompt() {
             alpha_b64:    passMap.get("alpha")    || "",
             id_matte_b64: passMap.get("id_matte") || "",
           };
+
+          // v1.1 — pull sharded sequence passes if the node was last
+          // rendered in sequence mode. meta.frame_count tells execute()
+          // whether to take the [N,H,W,3] batch path or the single-
+          // frame [1,H,W,3] path. Sharded keys are name=`{kind}_{idx}`
+          // with idx zero-padded so cursor sort = numeric order.
+          const metaEntries = await _palDBGetAllForNodeKind(uuid, "meta");
+          const fcEntry = metaEntries.find((m) => m.name === "frame_count");
+          const frameCount = fcEntry ? parseInt(fcEntry.data) || 0 : 0;
+          if (frameCount > 1) {
+            const passSeq = await _palDBGetAllForNodeKind(uuid, "pass_seq");
+            const seqByKind = { beauty: [], depth: [], normal: [], alpha: [] };
+            for (const entry of passSeq) {
+              const m = entry.name.match(/^([a-z]+)_(\d+)$/);
+              if (!m) continue;
+              const kind = m[1];
+              const idx = parseInt(m[2]);
+              if (!seqByKind[kind]) continue;
+              seqByKind[kind][idx] = entry.data || "";
+            }
+            // Pad missing indices with empty strings so the array
+            // length matches frameCount even if some shards failed.
+            for (const kind of Object.keys(seqByKind)) {
+              const arr = seqByKind[kind];
+              for (let i = 0; i < frameCount; i++) {
+                if (arr[i] == null) arr[i] = "";
+              }
+            }
+            fullState.frame_count = frameCount;
+            fullState.beauty_seq_b64 = seqByKind.beauty;
+            fullState.depth_seq_b64  = seqByKind.depth;
+            fullState.normal_seq_b64 = seqByKind.normal;
+            fullState.alpha_seq_b64  = seqByKind.alpha;
+          }
+
           widget.value = JSON.stringify(fullState);
           restorers.push(() => { widget.value = lean; });
         } catch (err) {
@@ -1675,6 +1710,68 @@ app.registerExtension({
           const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
           if (widget) widget.value = JSON.stringify(this._palState || {});
           _palWriteCache(this);
+        }
+        if (msg.type === "pal:render-sequence") {
+          // v1.1 — animated sequence batch from PAL viewport. Each pass
+          // becomes a per-frame shard in IDB so a 48-frame × 5-pass batch
+          // (~720MB at 1024² PNGs) doesn't blow the structured-clone size
+          // cap that a single giant key would hit. Python execute() walks
+          // these shards and stacks them into [N,H,W,3] IMAGE tensors.
+          const _seqUuid = _palAssetUuidFor(this);
+          const N = parseInt(msg.frame_count) || 0;
+          if (N <= 0) {
+            console.warn(`[PAL comfy] pal:render-sequence — empty frame_count=${msg.frame_count}`);
+            return;
+          }
+          const passKindMap = {
+            beauty: msg.beauty,
+            depth:  msg.depth,
+            normal: msg.normals,
+            alpha:  msg.alpha,
+          };
+          // Zero-pad frame index so cursor.openCursor returns shards
+          // in order (string sort, not numeric). 4 digits = up to 9999
+          // frames per sequence — well above the practical cap.
+          for (const [kind, arr] of Object.entries(passKindMap)) {
+            if (!Array.isArray(arr)) continue;
+            for (let i = 0; i < N; i++) {
+              const data = arr[i] || "";
+              _palDBPut(_seqUuid, "pass_seq", `${kind}_${String(i).padStart(4, '0')}`, { data });
+            }
+          }
+          _palDBPut(_seqUuid, "meta", "frame_count", { data: String(N) });
+          this._palRendered = true;
+          this._palSequenceMode = true;
+          // Drop any single-frame state from a prior pal:render so the
+          // queue doesn't smuggle yesterday's beauty into today's batch.
+          delete this._palState.beauty_b64;
+          delete this._palState.depth_b64;
+          delete this._palState.normal_b64;
+          delete this._palState.alpha_b64;
+          delete this._palState.id_matte_b64;
+          delete this._palState.beauty_seq_b64;
+          delete this._palState.depth_seq_b64;
+          delete this._palState.normal_seq_b64;
+          delete this._palState.alpha_seq_b64;
+          const widget = this.widgets?.find(w => w.name === "_pal_scene_state");
+          const stateJson = JSON.stringify(this._palState || {});
+          if (widget) {
+            widget.value = stateJson;
+            console.log(`[PAL comfy] pal:render-sequence — ${N} frames × 4 passes → IDB sharded; widget=${stateJson.length} bytes (lean)`);
+          }
+          _palWriteCache(this);
+          this._updateSummary?.();
+          // Auto-queue same as single-frame: prompt build will pull the
+          // sharded passes via graphToPrompt patch and inject them as
+          // *_seq_b64 arrays for the Python execute() to stack.
+          try {
+            if (typeof app?.queuePrompt === "function") {
+              setTimeout(() => {
+                try { app.queuePrompt(0, 1); } catch (err) { console.warn("[PAL comfy] auto-queue failed:", err); }
+              }, 80);
+            }
+          } catch (err) { console.warn("[PAL comfy] auto-queue dispatch failed:", err); }
+          return;
         }
         if (msg.type === "pal:render") {
           // Render passes (multi-MB each) go to IndexedDB instead of

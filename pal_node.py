@@ -156,23 +156,51 @@ class PALNode:
                 use_local_renderer = False  # fall through to iframe decode below
 
         if not use_local_renderer:
-            beauty = self._decode_pass(state.get("beauty_b64"), render_width, render_height)
-            # Use the ACTUAL beauty dimensions for blank/missing passes so
-            # we don't end up with a 512×288 beauty next to a 512×512 normal.
-            # Beauty tensor shape is (1, H, W, 3).
-            try:
-                _bh = int(beauty.shape[1])
-                _bw = int(beauty.shape[2])
-            except Exception:
-                _bh, _bw = render_height, render_width
-            depth = self._decode_pass(state.get("depth_b64"), _bw, _bh, channels=1) if has_multipass else self._blank(_bw, _bh, 1)
-            normals = self._decode_pass(state.get("normal_b64"), _bw, _bh) if has_multipass else self._blank(_bw, _bh)
-            alpha = self._decode_pass(state.get("alpha_b64"), _bw, _bh, channels=1) if has_multipass else self._blank(_bw, _bh, 1)
-            # id_matte_b64 ride-along — paid plans only, sized to match beauty.
-            if has_multipass and state.get("id_matte_b64"):
-                id_matte = self._decode_pass(state.get("id_matte_b64"), _bw, _bh)
+            # v1.1 — sequence mode. If the node was last rendered as an
+            # animated sequence, frame_count > 1 and *_seq_b64 arrays
+            # carry per-frame base64 PNGs. Stack each pass into an
+            # [N,H,W,3] IMAGE batch tensor for KSampler / Video Combine
+            # downstream. frame_count == 1 (or unset) → single-frame
+            # path below. Free-tier multipass gating runs per-frame.
+            frame_count = int(state.get("frame_count") or 0)
+            if frame_count > 1:
+                beauty_seq = state.get("beauty_seq_b64") or []
+                logger.info(f"[PAL Node] sequence mode — frame_count={frame_count}, beauty frames={len(beauty_seq)}")
+                beauty = self._decode_pass_batch(beauty_seq, render_width, render_height)
+                try:
+                    _bh = int(beauty.shape[1])
+                    _bw = int(beauty.shape[2])
+                except Exception:
+                    _bh, _bw = render_height, render_width
+                if has_multipass:
+                    depth   = self._decode_pass_batch(state.get("depth_seq_b64") or [],  _bw, _bh, channels=1)
+                    normals = self._decode_pass_batch(state.get("normal_seq_b64") or [], _bw, _bh)
+                    alpha   = self._decode_pass_batch(state.get("alpha_seq_b64") or [],  _bw, _bh, channels=1)
+                else:
+                    depth   = self._blank_batch(_bw, _bh, frame_count, 1)
+                    normals = self._blank_batch(_bw, _bh, frame_count)
+                    alpha   = self._blank_batch(_bw, _bh, frame_count, 1)
+                # id_matte not yet wired for sequence — blank batch so
+                # node outputs stay shape-consistent across passes.
+                id_matte = self._blank_batch(_bw, _bh, frame_count)
             else:
-                id_matte = self._blank(_bw, _bh)
+                beauty = self._decode_pass(state.get("beauty_b64"), render_width, render_height)
+                # Use the ACTUAL beauty dimensions for blank/missing passes so
+                # we don't end up with a 512×288 beauty next to a 512×512 normal.
+                # Beauty tensor shape is (1, H, W, 3).
+                try:
+                    _bh = int(beauty.shape[1])
+                    _bw = int(beauty.shape[2])
+                except Exception:
+                    _bh, _bw = render_height, render_width
+                depth = self._decode_pass(state.get("depth_b64"), _bw, _bh, channels=1) if has_multipass else self._blank(_bw, _bh, 1)
+                normals = self._decode_pass(state.get("normal_b64"), _bw, _bh) if has_multipass else self._blank(_bw, _bh)
+                alpha = self._decode_pass(state.get("alpha_b64"), _bw, _bh, channels=1) if has_multipass else self._blank(_bw, _bh, 1)
+                # id_matte_b64 ride-along — paid plans only, sized to match beauty.
+                if has_multipass and state.get("id_matte_b64"):
+                    id_matte = self._decode_pass(state.get("id_matte_b64"), _bw, _bh)
+                else:
+                    id_matte = self._blank(_bw, _bh)
 
         scene_data = state.get("scene", resolved.get("scene_state", {}))
         if isinstance(scene_data, str):
@@ -286,6 +314,48 @@ class PALNode:
         # ComfyUI IMAGE must be (B,H,W,3) — force RGB even when caller
         # requested a single channel (depth / alpha gates during free tier).
         return self._to_image_tensor(np.zeros((1, h, w, 3), dtype=np.float32))
+
+    def _decode_pass_batch(self, b64_list, width, height, channels=3):
+        """v1.1 — decode a list of per-frame base64 PNGs into a stacked
+        [N,H,W,3] IMAGE tensor. Empty / oversize entries become blank
+        frames so the batch stays the right length even when individual
+        shards failed. Same channel handling as _decode_pass: grayscale
+        passes (depth / alpha) come back as [N,H,W,3] RGB-replicated."""
+        if not b64_list:
+            return self._blank_batch(width, height, 1, channels)
+        frames = []
+        for b64 in b64_list:
+            if not b64 or len(b64) > MAX_BASE64_BYTES:
+                if channels == 1:
+                    frames.append(np.zeros((height, width, 3), dtype=np.float32))
+                else:
+                    frames.append(np.zeros((height, width, 3), dtype=np.float32))
+                continue
+            try:
+                raw = base64.b64decode(b64)
+                img = Image.open(io.BytesIO(raw))
+                if channels == 1:
+                    gray = np.array(img.convert("L"), dtype=np.float32) / 255.0
+                    frames.append(np.stack([gray, gray, gray], axis=-1))
+                else:
+                    frames.append(np.array(img.convert("RGB"), dtype=np.float32) / 255.0)
+            except Exception as e:
+                logger.warning(f"[PAL Node] _decode_pass_batch frame decode failed: {e}")
+                frames.append(np.zeros((height, width, 3), dtype=np.float32))
+        # Conform all frames to the first frame's shape so np.stack succeeds
+        # even when a shard came back blank with the (height, width)
+        # fallback while the real frames have a different size.
+        if frames:
+            target_shape = frames[0].shape
+            for i, f in enumerate(frames):
+                if f.shape != target_shape:
+                    frames[i] = np.zeros(target_shape, dtype=np.float32)
+        stacked = np.stack(frames, axis=0)
+        return self._to_image_tensor(stacked)
+
+    def _blank_batch(self, w, h, n, c=3):
+        # Sequence-mode equivalent of _blank — returns [N,H,W,3] tensor.
+        return self._to_image_tensor(np.zeros((n, h, w, 3), dtype=np.float32))
 
     @staticmethod
     def _to_image_tensor(arr):
