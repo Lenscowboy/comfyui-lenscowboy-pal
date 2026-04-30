@@ -14,7 +14,31 @@
 import { app } from "../../scripts/app.js";
 
 const EXT_NAME = "LensCowboy.PALLayout";
-const LC_API_BASE = (typeof window !== "undefined" && window.LC_API_BASE) || "https://app.lenscowboy.com";
+
+// Resolve the SaaS origin once at load time, in this order:
+//   1. window.LC_API_BASE — set by an early script tag for power users
+//   2. localStorage.getItem('lc_api_base') — flippable from any console
+//      window without editing the source. Drop the key to revert to prod.
+//   3. https://app.lenscowboy.com — production default
+//
+// To point this Comfy node at the dev SaaS deploy:
+//   localStorage.setItem('lc_api_base', 'https://lenscowboy-pipeline-dev-pb5x525ofq-uc.a.run.app');
+// Refresh ComfyUI. The PAL viewport iframe will load from dev, with
+// the pink "DEV" banner top-right confirming the switch.
+// To go back to production:  localStorage.removeItem('lc_api_base');
+const LC_API_BASE = (() => {
+  if (typeof window === "undefined") return "https://app.lenscowboy.com";
+  if (window.LC_API_BASE) return window.LC_API_BASE;
+  try {
+    const ls = window.localStorage?.getItem('lc_api_base');
+    if (ls && /^https?:\/\//.test(ls)) {
+      console.log(`[PAL comfy] LC_API_BASE override from localStorage → ${ls}`);
+      return ls;
+    }
+  } catch (_) { /* private browsing / sandboxed iframe */ }
+  return "https://app.lenscowboy.com";
+})();
+
 
 /* ── Badge constants ─────────────────────────────────────────────── */
 const BADGE = {
