@@ -206,9 +206,14 @@ class PALNode:
                     depth   = self._blank_batch(_bw, _bh, frame_count, 1)
                     normals = self._blank_batch(_bw, _bh, frame_count)
                     alpha   = self._blank_batch(_bw, _bh, frame_count, 1)
-                # id_matte not yet wired for sequence — blank batch so
-                # node outputs stay shape-consistent across passes.
-                id_matte = self._blank_batch(_bw, _bh, frame_count)
+                if has_multipass:
+                    matte_files = state.get("id_matte_seq_files") or []
+                    if matte_files and any(matte_files):
+                        id_matte = self._decode_pass_batch_files(matte_files, _bw, _bh)
+                    else:
+                        id_matte = self._decode_pass_batch(state.get("id_matte_seq_b64") or [], _bw, _bh)
+                else:
+                    id_matte = self._blank_batch(_bw, _bh, frame_count)
             else:
                 beauty = self._decode_pass(state.get("beauty_b64"), render_width, render_height)
                 # Use the ACTUAL beauty dimensions for blank/missing passes so

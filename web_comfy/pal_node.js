@@ -397,12 +397,15 @@ function _palPatchGraphToPrompt() {
           const frameCount = fcEntry ? parseInt(fcEntry.data) || 0 : 0;
           if (frameCount > 1) {
             const passSeq = await _palDBGetAllForNodeKind(uuid, "pass_seq");
-            const seqByKind = { beauty: [], depth: [], normal: [], alpha: [] };
+            const seqByKind = { beauty: [], depth: [], normal: [], alpha: [], id_matte: [] };
             for (const entry of passSeq) {
-              const m = entry.name.match(/^([a-z]+)_(\d+)$/);
-              if (!m) continue;
-              const kind = m[1];
-              const idx = parseInt(m[2]);
+              // id_matte has an underscore in the kind, so split on the
+              // last underscore not the regex which would chop "id" off.
+              const lastUnd = entry.name.lastIndexOf("_");
+              if (lastUnd < 0) continue;
+              const kind = entry.name.slice(0, lastUnd);
+              const idx = parseInt(entry.name.slice(lastUnd + 1));
+              if (!Number.isFinite(idx)) continue;
               if (!seqByKind[kind]) continue;
               seqByKind[kind][idx] = entry.data || "";
             }
@@ -423,7 +426,7 @@ function _palPatchGraphToPrompt() {
             // from input/ directory. Filenames are namespaced with
             // _pal_seq_{uuid}_{kind}_{idx}.png so multiple PAL nodes
             // and rerenders don't collide.
-            const uploaded = { beauty: [], depth: [], normal: [], alpha: [] };
+            const uploaded = { beauty: [], depth: [], normal: [], alpha: [], id_matte: [] };
             const uploadOne = async (kind, idx, b64) => {
               if (!b64) return "";
               const fname = `_pal_seq_${uuid}_${kind}_${String(idx).padStart(4, '0')}.png`;
@@ -472,12 +475,13 @@ function _palPatchGraphToPrompt() {
                 if (arr[i] == null) arr[i] = "";
               }
             }
-            console.log(`[PAL comfy] sequence upload — ${frameCount} frames × 4 passes → Comfy input/ dir`);
+            console.log(`[PAL comfy] sequence upload — ${frameCount} frames × 5 passes → Comfy input/ dir`);
             fullState.frame_count = frameCount;
-            fullState.beauty_seq_files = uploaded.beauty;
-            fullState.depth_seq_files  = uploaded.depth;
-            fullState.normal_seq_files = uploaded.normal;
-            fullState.alpha_seq_files  = uploaded.alpha;
+            fullState.beauty_seq_files   = uploaded.beauty;
+            fullState.depth_seq_files    = uploaded.depth;
+            fullState.normal_seq_files   = uploaded.normal;
+            fullState.alpha_seq_files    = uploaded.alpha;
+            fullState.id_matte_seq_files = uploaded.id_matte;
           }
 
           widget.value = JSON.stringify(fullState);
@@ -1832,10 +1836,11 @@ app.registerExtension({
             return;
           }
           const passKindMap = {
-            beauty: msg.beauty,
-            depth:  msg.depth,
-            normal: msg.normals,
-            alpha:  msg.alpha,
+            beauty:   msg.beauty,
+            depth:    msg.depth,
+            normal:   msg.normals,
+            alpha:    msg.alpha,
+            id_matte: msg.matte,
           };
           // Zero-pad frame index so cursor.openCursor returns shards
           // in order (string sort, not numeric). 4 digits = up to 9999
@@ -1865,7 +1870,7 @@ app.registerExtension({
           const stateJson = JSON.stringify(this._palState || {});
           if (widget) {
             widget.value = stateJson;
-            console.log(`[PAL comfy] pal:render-sequence — ${N} frames × 4 passes → IDB sharded; widget=${stateJson.length} bytes (lean)`);
+            console.log(`[PAL comfy] pal:render-sequence — ${N} frames × 5 passes → IDB sharded; widget=${stateJson.length} bytes (lean)`);
           }
           _palWriteCache(this);
           this._updateSummary?.();
