@@ -1869,16 +1869,16 @@ app.registerExtension({
           }
           _palWriteCache(this);
           this._updateSummary?.();
-          // Auto-queue same as single-frame: prompt build will pull the
-          // sharded passes via graphToPrompt patch and inject them as
-          // *_seq_b64 arrays for the Python execute() to stack.
-          try {
-            if (typeof app?.queuePrompt === "function") {
-              setTimeout(() => {
-                try { app.queuePrompt(0, 1); } catch (err) { console.warn("[PAL comfy] auto-queue failed:", err); }
-              }, 80);
-            }
-          } catch (err) { console.warn("[PAL comfy] auto-queue dispatch failed:", err); }
+          // Auto-queue moved from here to _saveAndClose. Rationale:
+          // user-perceived "double render" — viewport visibly captured
+          // frames, then auto-queue immediately ran the graph (Video
+          // Combine processing the frames) before the user closed the
+          // modal. Looked like two renders. Now: capture frames here
+          // → store in IDB → quiet. _saveAndClose triggers the queue
+          // when the user explicitly closes the viewport, so the
+          // sequence is render → close → process. Single source of
+          // truth: this._palRendered + this._palSequenceMode flags
+          // tell _saveAndClose whether to auto-queue.
           return;
         }
         if (msg.type === "pal:render") {
@@ -1926,19 +1926,11 @@ app.registerExtension({
           }
           _palWriteCache(this);
           this._updateSummary();
-          // Auto-queue the ComfyUI graph so the rendered beauty shows up
-          // in downstream Preview / Video Combine nodes immediately —
-          // user's expected flow is "press Render → see result", not
-          // "press Render, close modal, press Run, see result".
-          try {
-            if (typeof app?.queuePrompt === "function") {
-              // Short delay so the widget value sees the flush before the
-              // prompt is serialised for queue.
-              setTimeout(() => {
-                try { app.queuePrompt(0, 1); } catch (err) { console.warn("[PAL comfy] auto-queue failed:", err); }
-              }, 80);
-            }
-          } catch (err) { console.warn("[PAL comfy] auto-queue dispatch failed:", err); }
+          // Auto-queue moved to _saveAndClose for single-frame too —
+          // matches the sequence path's render → close → process
+          // flow. Avoids the user-perceived "double render" symptom
+          // where the graph ran while the viewport was still visible
+          // (capture and graph progress racing in the UI).
         }
       };
       window.addEventListener("message", _iframeHandler);
@@ -2230,6 +2222,27 @@ app.registerExtension({
       // Cleanup
       if (this._iframeCleanup) { this._iframeCleanup(); this._iframeCleanup = null; }
       modal.remove();
+
+      // Auto-queue the graph if the user rendered something this
+      // session. Moved from the per-render handlers (pal:render +
+      // pal:render-sequence) to here so the visual sequence is
+      // capture-in-viewport → close → graph runs once. Previously
+      // the auto-queue fired on render, racing the close — looked
+      // like the frames were rendered twice (once in viewport,
+      // once in the downstream graph). Single trigger, single run.
+      // graphToPrompt patch reads the IDB shards / pass entries,
+      // uploads sequence frames as files (avoids /api/prompt body
+      // cap), injects filenames into the widget at queue time.
+      if (this._palRendered) {
+        try {
+          if (typeof app?.queuePrompt === "function") {
+            setTimeout(() => {
+              try { app.queuePrompt(0, 1); }
+              catch (err) { console.warn("[PAL comfy] auto-queue on close failed:", err); }
+            }, 120);
+          }
+        } catch (err) { console.warn("[PAL comfy] auto-queue dispatch failed:", err); }
+      }
     };
 
     nodeType.prototype._updateSummary = function () {
