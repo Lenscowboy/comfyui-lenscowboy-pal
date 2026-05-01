@@ -2158,17 +2158,21 @@ app.registerExtension({
               // model in the viewport, the iframe's pal:state response
               // no longer carries it in scene.objects. Filter
               // _userScenes to keep only entries whose name still
-              // appears in the scene's imported_* objects (matched on
-              // _label, which the iframe set to the source filename
-              // on every load branch). Result: the LOAD 3D SCENE (N)
-              // counter on the node updates to reflect what the user
-              // actually kept.
+              // appears in the scene's imported_* objects.
+              //
+              // Match key: o._comfySourceName (the filename the user
+              // picked, set on userData by every load branch in
+              // pal:load-models). NOT o._label — _label is now the
+              // mesh's own name from the source DCC ("Cube"), which
+              // doesn't equal s.name ("model.fbx"). Matching on _label
+              // wiped the entire _userScenes on close because no
+              // mesh name ever equalled a filename.
               try {
                 if (Array.isArray(this._userScenes) && this._userScenes.length && Array.isArray(st.scene?.objects)) {
                   const presentNames = new Set(
                     st.scene.objects
                       .filter(o => typeof o?.proxy_type === "string" && o.proxy_type.startsWith("imported_"))
-                      .map(o => o._label)
+                      .map(o => o._comfySourceName || o._label)  // _label fallback for older renders
                       .filter(Boolean)
                   );
                   const before = this._userScenes.length;
