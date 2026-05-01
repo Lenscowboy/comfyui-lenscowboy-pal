@@ -99,6 +99,20 @@ function _palBase64ToBlob(b64, mime = "image/png") {
   return new Blob([buf], { type: mime });
 }
 
+async function _palDBDeleteForNodeKindName(nodeUuid, kind, name) {
+  if (!nodeUuid) return;
+  try {
+    const db = await _palOpenDB();
+    const key = `${nodeUuid}__${kind}__${name}`;
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(_PAL_DB_STORE, "readwrite");
+      tx.objectStore(_PAL_DB_STORE).delete(key);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) { console.warn("[PAL comfy] IDB delete failed:", err); }
+}
+
 async function _palDBGetAllForNodeKind(nodeUuid, kind) {
   if (!nodeUuid) return [];
   try {
@@ -2148,6 +2162,53 @@ app.registerExtension({
               if (st.camera)       this._palState.camera       = st.camera;
               if (st.settings)     this._palState.settings     = st.settings;
               if (st.cameraSystem) this._palState.cameraSystem = st.cameraSystem;
+              // Delete-and-flush: when the user removed a Load-3D-Scene
+              // model in the viewport, the iframe's pal:state response
+              // no longer carries it in scene.objects. Filter
+              // _userScenes to keep only entries whose name still
+              // appears in the scene's imported_* objects (matched on
+              // _label, which the iframe set to the source filename
+              // on every load branch). Result: the LOAD 3D SCENE (N)
+              // counter on the node updates to reflect what the user
+              // actually kept.
+              try {
+                if (Array.isArray(this._userScenes) && this._userScenes.length && Array.isArray(st.scene?.objects)) {
+                  const presentNames = new Set(
+                    st.scene.objects
+                      .filter(o => typeof o?.proxy_type === "string" && o.proxy_type.startsWith("imported_"))
+                      .map(o => o._label)
+                      .filter(Boolean)
+                  );
+                  const before = this._userScenes.length;
+                  const kept = this._userScenes.filter(s => presentNames.has(s.name));
+                  if (kept.length !== before) {
+                    this._userScenes = kept;
+                    if (this._sceneBtnEl) {
+                      this._sceneBtnEl.textContent = `LOAD 3D SCENE (${kept.length})`;
+                    }
+                    // IDB also stores per-scene shards (kind="scene") for
+                    // hydration — drop the ones the user deleted so they
+                    // don't re-appear on next viewport open. We keep
+                    // scenes by name (matches _palDBPut key in
+                    // _pickScene). _palDBDeleteForNodeKindName is the
+                    // surgical removal helper.
+                    try {
+                      const _flushUuid = _palAssetUuidFor(this);
+                      const keptNames = new Set(this._userScenes.map(s => s.name));
+                      _palDBGetAllForNodeKind(_flushUuid, "scene").then(rows => {
+                        for (const row of rows) {
+                          if (!keptNames.has(row.name)) {
+                            _palDBDeleteForNodeKindName(_flushUuid, "scene", row.name);
+                          }
+                        }
+                      });
+                    } catch (_) { /* IDB unavailable — kept list is the source of truth on next save */ }
+                    console.log(`[PAL comfy] flushed ${before - kept.length} deleted scene(s); LOAD 3D SCENE (${kept.length})`);
+                  }
+                }
+              } catch (err) {
+                console.warn("[PAL comfy] _userScenes flush failed:", err);
+              }
               done();
             }
           };
