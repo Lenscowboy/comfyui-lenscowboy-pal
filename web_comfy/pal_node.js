@@ -88,6 +88,17 @@ async function _palDBPut(nodeUuid, kind, name, value) {
   } catch (err) { console.warn("[PAL comfy] IDB put failed:", err); }
 }
 
+// Decode a raw (no data: prefix) base64 string into a Blob. Used to
+// upload sequence frames to Comfy's /api/upload/image endpoint without
+// re-encoding through canvas/Image.
+function _palBase64ToBlob(b64, mime = "image/png") {
+  const bin = atob(b64);
+  const len = bin.length;
+  const buf = new Uint8Array(len);
+  for (let i = 0; i < len; i++) buf[i] = bin.charCodeAt(i);
+  return new Blob([buf], { type: mime });
+}
+
 async function _palDBGetAllForNodeKind(nodeUuid, kind) {
   if (!nodeUuid) return [];
   try {
@@ -389,11 +400,70 @@ function _palPatchGraphToPrompt() {
                 if (arr[i] == null) arr[i] = "";
               }
             }
+            // Inlining base64 frames in the widget blew Comfy's
+            // /api/prompt body cap (413 Request Entity Too Large) —
+            // 24 frames × 4 passes × ~3MB easily exceeds the default
+            // 100MB. Upload each frame to Comfy's /api/upload/image
+            // endpoint instead (designed for big binary), keep only
+            // filenames in the widget. Python execute() reads back
+            // from input/ directory. Filenames are namespaced with
+            // _pal_seq_{uuid}_{kind}_{idx}.png so multiple PAL nodes
+            // and rerenders don't collide.
+            const uploaded = { beauty: [], depth: [], normal: [], alpha: [] };
+            const uploadOne = async (kind, idx, b64) => {
+              if (!b64) return "";
+              const fname = `_pal_seq_${uuid}_${kind}_${String(idx).padStart(4, '0')}.png`;
+              try {
+                const blob = _palBase64ToBlob(b64, "image/png");
+                const fd = new FormData();
+                fd.append("image", blob, fname);
+                fd.append("type", "input");
+                fd.append("subfolder", "");
+                fd.append("overwrite", "true");
+                const r = await fetch("/api/upload/image", { method: "POST", body: fd });
+                if (!r.ok) {
+                  console.warn(`[PAL comfy] frame upload ${kind}[${idx}] failed:`, r.status);
+                  return "";
+                }
+                const j = await r.json();
+                return j.name || fname;
+              } catch (err) {
+                console.warn(`[PAL comfy] frame upload ${kind}[${idx}] error:`, err);
+                return "";
+              }
+            };
+            // Upload all frames in parallel batches of 16 to balance
+            // throughput (browser caps concurrent fetches around 6
+            // per origin, but uploads are mostly disk I/O on the
+            // server side so we benefit from queueing slightly above
+            // that cap).
+            const uploadJobs = [];
+            for (const kind of Object.keys(seqByKind)) {
+              for (let i = 0; i < frameCount; i++) {
+                uploadJobs.push({ kind, i });
+              }
+            }
+            const BATCH = 16;
+            for (let batchStart = 0; batchStart < uploadJobs.length; batchStart += BATCH) {
+              const batch = uploadJobs.slice(batchStart, batchStart + BATCH);
+              const results = await Promise.all(batch.map((j) =>
+                uploadOne(j.kind, j.i, seqByKind[j.kind][j.i])
+              ));
+              batch.forEach((j, k) => { uploaded[j.kind][j.i] = results[k]; });
+            }
+            // Pad missing slots so array length matches frame_count.
+            for (const kind of Object.keys(uploaded)) {
+              const arr = uploaded[kind];
+              for (let i = 0; i < frameCount; i++) {
+                if (arr[i] == null) arr[i] = "";
+              }
+            }
+            console.log(`[PAL comfy] sequence upload — ${frameCount} frames × 4 passes → Comfy input/ dir`);
             fullState.frame_count = frameCount;
-            fullState.beauty_seq_b64 = seqByKind.beauty;
-            fullState.depth_seq_b64  = seqByKind.depth;
-            fullState.normal_seq_b64 = seqByKind.normal;
-            fullState.alpha_seq_b64  = seqByKind.alpha;
+            fullState.beauty_seq_files = uploaded.beauty;
+            fullState.depth_seq_files  = uploaded.depth;
+            fullState.normal_seq_files = uploaded.normal;
+            fullState.alpha_seq_files  = uploaded.alpha;
           }
 
           widget.value = JSON.stringify(fullState);

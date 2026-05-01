@@ -164,18 +164,44 @@ class PALNode:
             # path below. Free-tier multipass gating runs per-frame.
             frame_count = int(state.get("frame_count") or 0)
             if frame_count > 1:
-                beauty_seq = state.get("beauty_seq_b64") or []
-                logger.info(f"[PAL Node] sequence mode — frame_count={frame_count}, beauty frames={len(beauty_seq)}")
-                beauty = self._decode_pass_batch(beauty_seq, render_width, render_height)
+                # v1.1 sequence mode. Two transports supported:
+                #   1. _seq_files (preferred): filenames written to
+                #      Comfy's input/ dir via /api/upload/image at
+                #      queue time. Avoids the prompt body cap that
+                #      inlined base64 hits at frame_count > ~4.
+                #   2. _seq_b64 (legacy fallback): inlined base64
+                #      arrays. Works for tiny sequences only.
+                # Prefer files when present; fall back to inline if
+                # the upload path failed or older client wrote b64.
+                beauty_files = state.get("beauty_seq_files") or []
+                if beauty_files and any(beauty_files):
+                    logger.info(f"[PAL Node] sequence mode (files) — frame_count={frame_count}")
+                    beauty = self._decode_pass_batch_files(beauty_files, render_width, render_height)
+                else:
+                    beauty_seq = state.get("beauty_seq_b64") or []
+                    logger.info(f"[PAL Node] sequence mode (b64) — frame_count={frame_count}, beauty frames={len(beauty_seq)}")
+                    beauty = self._decode_pass_batch(beauty_seq, render_width, render_height)
                 try:
                     _bh = int(beauty.shape[1])
                     _bw = int(beauty.shape[2])
                 except Exception:
                     _bh, _bw = render_height, render_width
                 if has_multipass:
-                    depth   = self._decode_pass_batch(state.get("depth_seq_b64") or [],  _bw, _bh, channels=1)
-                    normals = self._decode_pass_batch(state.get("normal_seq_b64") or [], _bw, _bh)
-                    alpha   = self._decode_pass_batch(state.get("alpha_seq_b64") or [],  _bw, _bh, channels=1)
+                    depth_files  = state.get("depth_seq_files")  or []
+                    normal_files = state.get("normal_seq_files") or []
+                    alpha_files  = state.get("alpha_seq_files")  or []
+                    if depth_files and any(depth_files):
+                        depth = self._decode_pass_batch_files(depth_files, _bw, _bh, channels=1)
+                    else:
+                        depth = self._decode_pass_batch(state.get("depth_seq_b64") or [], _bw, _bh, channels=1)
+                    if normal_files and any(normal_files):
+                        normals = self._decode_pass_batch_files(normal_files, _bw, _bh)
+                    else:
+                        normals = self._decode_pass_batch(state.get("normal_seq_b64") or [], _bw, _bh)
+                    if alpha_files and any(alpha_files):
+                        alpha = self._decode_pass_batch_files(alpha_files, _bw, _bh, channels=1)
+                    else:
+                        alpha = self._decode_pass_batch(state.get("alpha_seq_b64") or [], _bw, _bh, channels=1)
                 else:
                     depth   = self._blank_batch(_bw, _bh, frame_count, 1)
                     normals = self._blank_batch(_bw, _bh, frame_count)
@@ -356,6 +382,50 @@ class PALNode:
     def _blank_batch(self, w, h, n, c=3):
         # Sequence-mode equivalent of _blank — returns [N,H,W,3] tensor.
         return self._to_image_tensor(np.zeros((n, h, w, 3), dtype=np.float32))
+
+    def _decode_pass_batch_files(self, filenames, width, height, channels=3):
+        """Read sequence frames from Comfy's input/ directory by filename
+        and stack into a [N,H,W,3] IMAGE tensor. Used for the file-upload
+        transport path (avoids the /api/prompt body-size cap that inlined
+        base64 hit). Empty / missing / unreadable files become blank
+        frames so the batch stays the correct length even when individual
+        uploads failed."""
+        try:
+            import folder_paths
+            input_dir = folder_paths.get_input_directory()
+        except Exception as e:
+            logger.warning(f"[PAL Node] could not resolve input dir: {e}")
+            return self._blank_batch(width, height, len(filenames) or 1, channels)
+        import os
+        frames = []
+        for fname in filenames:
+            if not fname:
+                frames.append(np.zeros((height, width, 3), dtype=np.float32))
+                continue
+            path = os.path.join(input_dir, fname)
+            if not os.path.isfile(path):
+                logger.warning(f"[PAL Node] sequence frame missing: {path}")
+                frames.append(np.zeros((height, width, 3), dtype=np.float32))
+                continue
+            try:
+                img = Image.open(path)
+                if channels == 1:
+                    gray = np.array(img.convert("L"), dtype=np.float32) / 255.0
+                    frames.append(np.stack([gray, gray, gray], axis=-1))
+                else:
+                    frames.append(np.array(img.convert("RGB"), dtype=np.float32) / 255.0)
+            except Exception as e:
+                logger.warning(f"[PAL Node] sequence frame decode failed {fname}: {e}")
+                frames.append(np.zeros((height, width, 3), dtype=np.float32))
+        # Conform shapes so np.stack succeeds even when fallbacks differ
+        # in dimension from the real frames.
+        if frames:
+            target_shape = next((f.shape for f in frames if f.any()), frames[0].shape)
+            for i, f in enumerate(frames):
+                if f.shape != target_shape:
+                    frames[i] = np.zeros(target_shape, dtype=np.float32)
+        stacked = np.stack(frames, axis=0)
+        return self._to_image_tensor(stacked)
 
     @staticmethod
     def _to_image_tensor(arr):
