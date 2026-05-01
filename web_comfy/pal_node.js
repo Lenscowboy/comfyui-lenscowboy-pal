@@ -701,7 +701,7 @@ app.registerExtension({
               data: row.data,
             }));
             if (nodeRef._texBtnEl) {
-              nodeRef._texBtnEl.textContent = `UPLOAD TEXTURES (${nodeRef._userTextures.length})`;
+              nodeRef._texBtnEl.textContent = `LOAD TEXTURES (${nodeRef._userTextures.length})`;
             }
             console.log(`[PAL comfy] hydrated ${nodeRef._userTextures.length} texture(s) from IDB`);
           }
@@ -941,7 +941,7 @@ app.registerExtension({
       // UDIM-style tile sets that end up misnamed, etc.). Opens a top-level
       // file picker — works reliably because it runs in ComfyUI's main
       // window, not the cross-origin iframe that blocks showDirectoryPicker.
-      // Upload Textures — DOM button matching OPEN VIEWPORT / LOAD 3D SCENE
+      // Load Textures — DOM button matching OPEN VIEWPORT / LOAD 3D SCENE
       // sizing. Three CTAs in a column: amber (OPEN), teal (TEXTURES),
       // violet (SCENE). Same height/font so the row reads as a coherent
       // toolbar. LiteGraph button replaced because Vue caches its label —
@@ -949,7 +949,7 @@ app.registerExtension({
       this._userTextures = [];
       const _texBtnEl = document.createElement("button");
       _texBtnEl.type = "button";
-      _texBtnEl.textContent = `UPLOAD TEXTURES (${this._userTextures.length})`;
+      _texBtnEl.textContent = `LOAD TEXTURES (${this._userTextures.length})`;
       _texBtnEl.style.cssText = [
         "width:calc(100% - 16px)",
         "height:44px",
@@ -991,7 +991,7 @@ app.registerExtension({
         });
         if (texWidget) texWidget.computeSize = () => [0, 56];
       } else {
-        this._texBtn = this.addWidget("button", "UPLOAD TEXTURES (0)", "upload_textures", () => {
+        this._texBtn = this.addWidget("button", "LOAD TEXTURES (0)", "upload_textures", () => {
           this._pickTextures();
         });
         this._texBtn.serialize = false;
@@ -1189,7 +1189,7 @@ app.registerExtension({
         }
         // Refresh DOM button label (Vue cache doesn't apply to DOM widgets).
         if (nodeRef._texBtnEl) {
-          nodeRef._texBtnEl.textContent = `UPLOAD TEXTURES (${nodeRef._userTextures.length})`;
+          nodeRef._texBtnEl.textContent = `LOAD TEXTURES (${nodeRef._userTextures.length})`;
         }
         nodeRef._updateSummary?.();
         app.graph?.setDirtyCanvas?.(true);
@@ -1351,9 +1351,9 @@ app.registerExtension({
           const modal = document.getElementById("pal-comfy-modal");
           const iframe = modal?.querySelector("iframe");
           if (iframe?.contentWindow) {
-            // Merge user textures (from UPLOAD TEXTURES) on top of any
+            // Merge user textures (from LOAD TEXTURES) on top of any
             // resources picked alongside the model — both can coexist.
-            // De-dup by filename so a texture in UPLOAD TEXTURES doesn't
+            // De-dup by filename so a texture in LOAD TEXTURES doesn't
             // double-up if also in the scene pick.
             const models = uploaded.map((u) => {
               const merged = new Map((u.resources || []).map((r) => [r.name, r]));
@@ -2223,26 +2223,14 @@ app.registerExtension({
       if (this._iframeCleanup) { this._iframeCleanup(); this._iframeCleanup = null; }
       modal.remove();
 
-      // Auto-queue the graph if the user rendered something this
-      // session. Moved from the per-render handlers (pal:render +
-      // pal:render-sequence) to here so the visual sequence is
-      // capture-in-viewport → close → graph runs once. Previously
-      // the auto-queue fired on render, racing the close — looked
-      // like the frames were rendered twice (once in viewport,
-      // once in the downstream graph). Single trigger, single run.
-      // graphToPrompt patch reads the IDB shards / pass entries,
-      // uploads sequence frames as files (avoids /api/prompt body
-      // cap), injects filenames into the widget at queue time.
-      if (this._palRendered) {
-        try {
-          if (typeof app?.queuePrompt === "function") {
-            setTimeout(() => {
-              try { app.queuePrompt(0, 1); }
-              catch (err) { console.warn("[PAL comfy] auto-queue on close failed:", err); }
-            }, 120);
-          }
-        } catch (err) { console.warn("[PAL comfy] auto-queue dispatch failed:", err); }
-      }
+      // No auto-queue. User triggers the graph manually via Run when
+      // they're ready. Both per-render handlers (pal:render +
+      // pal:render-sequence) also no-op on queue — render captures
+      // frames into IDB / state and stops. graphToPrompt patch on
+      // the next user-initiated Run picks up the rendered shards
+      // and uploads them as files for the prompt. Earlier auto-queue
+      // here / on render felt like a double render in the UI when
+      // capture and graph processing raced.
     };
 
     nodeType.prototype._updateSummary = function () {
@@ -2262,7 +2250,7 @@ app.registerExtension({
 
       if (this._summaryWidget) {
         // Vue frontend caches button widget labels at creation, so the
-        // UPLOAD TEXTURES button can't show its own count. Surface it
+        // LOAD TEXTURES button can't show its own count. Surface it
         // here when non-zero, to keep the summary tight.
         const texPart = texCount ? ` | ${texCount} tex` : "";
         const scenePart = sceneCount ? ` | ${sceneCount} scene${sceneCount > 1 ? "s" : ""}` : "";
