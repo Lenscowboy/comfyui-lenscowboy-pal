@@ -2169,12 +2169,26 @@ app.registerExtension({
               // mesh name ever equalled a filename.
               try {
                 if (Array.isArray(this._userScenes) && this._userScenes.length && Array.isArray(st.scene?.objects)) {
+                  // Source-of-truth filename match. _label was used in
+                  // an earlier version but is now mesh name (e.g. "Cube")
+                  // not filename — stays here as a last-resort fallback.
                   const presentNames = new Set(
                     st.scene.objects
                       .filter(o => typeof o?.proxy_type === "string" && o.proxy_type.startsWith("imported_"))
-                      .map(o => o._comfySourceName || o._label)  // _label fallback for older renders
+                      .map(o => o._comfySourceName)
                       .filter(Boolean)
                   );
+                  // Safety: if NO scene objects carry _comfySourceName
+                  // (iframe still on older code without the tag), skip
+                  // the filter entirely. Don't wipe _userScenes when we
+                  // can't positively identify which entries to drop —
+                  // false-negative wipe is the user's "loaded scenes
+                  // disappeared on close" symptom.
+                  if (presentNames.size === 0) {
+                    console.log("[PAL comfy] flush skipped — iframe didn't tag _comfySourceName on imported objects (older deploy?). _userScenes preserved.");
+                    done();
+                    return;
+                  }
                   const before = this._userScenes.length;
                   const kept = this._userScenes.filter(s => presentNames.has(s.name));
                   if (kept.length !== before) {
