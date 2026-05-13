@@ -64,6 +64,27 @@ git clone https://github.com/lenscowboy/comfyui-lenscowboy-pal.git
 | frame_start | INT | Timeline range |
 | frame_end | INT | Timeline range |
 
+## Schema Synchronization
+
+This repo vendors a pinned copy of the `LCBE_LAYOUT` JSON Schema from the canonical [lcbe-layout-schema](https://github.com/Lenscowboy/lcbe-layout-schema) repository. The schema defines the wire format that PAL emits when it talks to other LCBE-ecosystem nodes (notably [comfyui-lenscowboy-lcbe](https://github.com/Lenscowboy/comfyui-lenscowboy-lcbe)).
+
+Files:
+
+- `schemas/PINNED_VERSION` — the semver of the upstream tag this repo is pinned to (e.g. `1.0.0`).
+- `schemas/lcbe_layout.schema.json` — vendored copy of the upstream schema at the pinned version.
+- `schemas/.sha256` — SHA-256 of the upstream schema, used by CI to detect drift.
+
+A GitHub Actions check (`.github/workflows/schema-check.yml`) runs on every PR and main push and fails if the local schema diverges from the pinned upstream version.
+
+### Bumping the pinned schema version
+
+1. Edit `schemas/PINNED_VERSION` to the new semver (e.g. `1.0.1` or `1.1.0`).
+2. Run `bash scripts/sync-schema.sh` — this fetches the upstream schema at the new tag and updates `schemas/lcbe_layout.schema.json` and `schemas/.sha256`.
+3. Commit all three files: `git add schemas/PINNED_VERSION schemas/lcbe_layout.schema.json schemas/.sha256 && git commit -m "Bump LCBE_LAYOUT schema to vX.Y.Z"`.
+4. Push and confirm `Schema sync check` passes.
+
+Never edit `schemas/lcbe_layout.schema.json` directly — the canonical source is upstream. Local edits are detected by the CI check and rejected.
+
 ## License
 
 MIT

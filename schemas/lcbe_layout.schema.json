@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lenscowboy.github.io/lcbe-layout-schema/schemas/v1.0/lcbe_layout.schema.json",
+  "title": "LCBE_LAYOUT v1.0",
+  "description": "Spatial and temporal scene layout passed between LCBE-ecosystem ComfyUI nodes (typically PAL → LCBE). Coordinate conventions are LOCKED for the lifetime of v1: right-handed, Y-up, metres, radians, vertical FOV, quaternions in [x, y, z, w] order, time in seconds, frames zero-indexed. A future consumer needing different conventions converts at the boundary — the wire format does not negotiate.",
+  "type": "object",
+  "required": ["schema_version", "coordinate_system", "cameras"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Schema version of this payload. Consumers branch on this, not on socket type."
+    },
+    "shot_id": {
+      "type": "string",
+      "description": "LCBE shot ID if the layout originated from an LCBE shot. Absent for pre-LCBE PAL exports."
+    },
+    "coordinate_system": {
+      "$ref": "#/$defs/coordinate_system"
+    },
+    "duration_seconds": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Total shot duration in seconds. Derived from longest camera track if absent."
+    },
+    "frame_rate": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Authoring frame rate in frames per second. Defaults to 24 if absent."
+    },
+    "cameras": {
+      "type": "array",
+      "description": "Camera objects, each with its own keyframe track. May be empty; at least one camera is strongly recommended.",
+      "items": { "$ref": "#/$defs/camera" }
+    },
+    "proxies": {
+      "type": "array",
+      "description": "Proxy geometry representing actors, props, or scene elements that exist in the spatial layout but do not need full mesh data.",
+      "items": { "$ref": "#/$defs/proxy" }
+    },
+    "world": {
+      "$ref": "#/$defs/world"
+    }
+  },
+  "$defs": {
+    "coordinate_system": {
+      "type": "object",
+      "description": "Runtime self-check block. All four fields are constants in v1.0 — a consumer reading an unknown payload fails loudly if any value diverges, rather than silently misinterpreting data.",
+      "required": ["handedness", "up", "units", "angle_units"],
+      "additionalProperties": true,
+      "properties": {
+        "handedness": { "type": "string", "const": "right" },
+        "up": { "type": "string", "const": "y" },
+        "units": { "type": "string", "const": "metres" },
+        "angle_units": { "type": "string", "const": "radians" }
+      }
+    },
+    "translation": {
+      "type": "array",
+      "description": "World-space position as [x, y, z] in metres.",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "number" }
+    },
+    "rotation_quaternion": {
+      "type": "array",
+      "description": "Rotation as quaternion [x, y, z, w]. Matches Three.js convention. Note: Unity and Unreal use [w, x, y, z] — convert at the boundary, never in the wire format.",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "type": "number" }
+    },
+    "scale": {
+      "type": "array",
+      "description": "Per-axis scale [sx, sy, sz] as unitless multipliers. Use [1, 1, 1] for unscaled.",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "number" }
+    },
+    "camera": {
+      "type": "object",
+      "required": ["id", "fov_vertical_radians", "keyframes"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique within the payload. Stable across re-exports."
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable label."
+        },
+        "fov_vertical_radians": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 3.141592653589793,
+          "description": "Authoritative vertical field of view in radians. Matches Three.js PerspectiveCamera.fov after the engine's internal degrees→radians conversion."
+        },
+        "focal_length_mm": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Optional metadata. Must be consistent with fov_vertical_radians given sensor width. Formula: fov_vertical_radians = 2 * atan(sensor_height / (2 * focal_length)), with sensor_height = sensor_width * 24/36 for the default 36mm full-frame sensor."
+        },
+        "sensor_width_mm": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Defaults to 36 mm (full-frame) when absent."
+        },
+        "near": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Near clipping plane in metres. Defaults to 0.1."
+        },
+        "far": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Far clipping plane in metres. Defaults to 1000."
+        },
+        "keyframes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/camera_keyframe" }
+        }
+      }
+    },
+    "camera_keyframe": {
+      "type": "object",
+      "required": ["time_seconds", "translation", "rotation_quaternion"],
+      "additionalProperties": true,
+      "properties": {
+        "time_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Time of this keyframe in seconds. Cameras do not scale, so no scale field is present."
+        },
+        "translation": { "$ref": "#/$defs/translation" },
+        "rotation_quaternion": { "$ref": "#/$defs/rotation_quaternion" }
+      }
+    },
+    "proxy": {
+      "type": "object",
+      "required": ["id", "kind", "translation", "rotation_quaternion", "scale"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique within the payload."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["box", "sphere", "capsule", "mesh_ref"],
+          "description": "Proxy geometry kind. box: unit cube at origin, transformed. sphere: unit-radius sphere at origin. capsule: 1 m total height, 0.25 m radius, Y-axis aligned. mesh_ref: external mesh, requires mesh_ref field."
+        },
+        "label": {
+          "type": "string",
+          "description": "Human-readable label (often the actor name)."
+        },
+        "mesh_ref": { "$ref": "#/$defs/mesh_ref" },
+        "translation": { "$ref": "#/$defs/translation" },
+        "rotation_quaternion": { "$ref": "#/$defs/rotation_quaternion" },
+        "scale": { "$ref": "#/$defs/scale" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "mesh_ref" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["mesh_ref"]
+          }
+        }
+      ]
+    },
+    "mesh_ref": {
+      "type": "object",
+      "required": ["url", "format"],
+      "additionalProperties": true,
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Resolvable LCBE asset URL. Must be either an lcbe://asset/{asset_id} reference or an absolute HTTPS URL to the LCBE asset proxy (/v1/media/asset/{asset_id}/{format}). Local-machine paths (file://, /Users/..., C:\\...) and non-LCBE URLs are rejected by validation. Producers like PAL must upload local GLBs via POST /v1/media/asset before emitting payloads that reference them.",
+          "oneOf": [
+            { "pattern": "^lcbe://asset/[A-Za-z0-9_-]+$" },
+            { "pattern": "^https://[A-Za-z0-9.-]+/v1/media/asset/[A-Za-z0-9_-]+/[a-z0-9]+$" }
+          ]
+        },
+        "format": {
+          "type": "string",
+          "enum": ["glb"],
+          "description": "Asset format. v1.0 supports glb only. fbx and usd are reserved for v1.1+ additive expansion when an actual consumer needs them."
+        }
+      }
+    },
+    "world": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "ground_plane": {
+          "type": "string",
+          "const": "y=0",
+          "description": "Ground plane convention. v1.0 supports y=0 only. Future versions may allow tilted planes."
+        },
+        "scale_reference": {
+          "type": "string",
+          "description": "Free-text human-readable scale hint (e.g. 'human_height_1.7m'). Aids consumers in sanity-checking scale."
+        }
+      }
+    }
+  }
+}

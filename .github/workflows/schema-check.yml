@@ -1,0 +1,17 @@
+name: Schema sync check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Schema matches pinned upstream
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+      - name: Verify schema is in sync with pinned upstream
+        run: bash scripts/sync-schema.sh --check-only
