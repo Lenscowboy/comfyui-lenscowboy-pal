@@ -874,7 +874,9 @@ app.registerExtension({
         brandEl.style.cssText =
           "text-align:center;font:bold 28px 'Space Mono',Consolas,monospace;" +
           "letter-spacing:0.22em;color:#e8a020;padding:14px 10px 10px;" +
-          "text-transform:uppercase;pointer-events:none;";
+          "text-transform:uppercase;pointer-events:none;" +
+          "box-sizing:border-box;width:100%;min-width:0;" +
+          "overflow:hidden;white-space:nowrap;text-overflow:ellipsis;";
         const brandWidget = this.addDOMWidget("lc_brand", "div", brandEl, {
           serialize: false,
           hideOnZoom: false,
@@ -907,6 +909,11 @@ app.registerExtension({
         "cursor:pointer",
         "pointer-events:auto",
         "transition:background 0.12s, border-color 0.12s",
+        "box-sizing:border-box",
+        "min-width:0",
+        "overflow:hidden",
+        "white-space:nowrap",
+        "text-overflow:ellipsis",
       ].join(";");
       _ovBtn.addEventListener("mouseenter", () => {
         _ovBtn.style.background = "#241f10";
@@ -970,6 +977,11 @@ app.registerExtension({
         "cursor:pointer",
         "pointer-events:auto",
         "transition:background 0.12s, border-color 0.12s",
+        "box-sizing:border-box",
+        "min-width:0",
+        "overflow:hidden",
+        "white-space:nowrap",
+        "text-overflow:ellipsis",
       ].join(";");
       _texBtnEl.addEventListener("mouseenter", () => {
         _texBtnEl.style.background = "#0e2026";
@@ -1036,6 +1048,11 @@ app.registerExtension({
         "cursor:pointer",
         "pointer-events:auto",
         "transition:background 0.12s, border-color 0.12s",
+        "box-sizing:border-box",
+        "min-width:0",
+        "overflow:hidden",
+        "white-space:nowrap",
+        "text-overflow:ellipsis",
       ].join(";");
       _sceneBtnEl.addEventListener("mouseenter", () => {
         _sceneBtnEl.style.background = "#1f1828";
