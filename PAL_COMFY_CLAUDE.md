@@ -65,7 +65,7 @@ All inputs are optional.
 
 | Input | Type | Purpose |
 |-------|------|---------|
-| `lc_api_key` | STRING | LensCowboy platform token — authenticates with PAL SaaS |
+| `lc_api_key` | STRING | Lenscowboy platform token — authenticates with PAL SaaS |
 | `lc_project_id` | STRING | Platform project to load |
 | `lc_shot_id` | STRING | Specific shot to load |
 | `glb_path` | STRING | Legacy file path to a GLB model |
@@ -202,7 +202,7 @@ No API key → node runs in free tier (24h anonymous JWT auto-minted via `?comfy
 
 ## Plans & Pricing
 
-ComfyUI users are 3D artists, not necessarily full LensCowboy SaaS subscribers. The node supports four plan states, resolved from the API key JWT (`plan` claim). No key = free tier (anonymous 24h JWT auto-injected via `comfy=1` param).
+ComfyUI users are 3D artists, not necessarily full Lenscowboy SaaS subscribers. The node supports four plan states, resolved from the API key JWT (`plan` claim). No key = free tier (anonymous 24h JWT auto-injected via `comfy=1` param).
 
 ### Plan matrix
 

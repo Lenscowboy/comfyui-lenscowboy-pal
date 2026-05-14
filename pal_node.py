@@ -22,7 +22,7 @@ MAX_BASE64_BYTES = 30_000_000
 
 
 class PALNode:
-    CATEGORY = "LensCowboy/Layout"
+    CATEGORY = "Lenscowboy/Layout"
     RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", "IMAGE", "IMAGE", "STRING", "STRING", "INT", "INT", "STRING")
     RETURN_NAMES = (
         "beauty pass", "alpha pass", "depth pass", "normal pass", "id matte pass",

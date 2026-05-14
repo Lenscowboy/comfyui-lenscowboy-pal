@@ -1,6 +1,6 @@
 # PAL Layout Node for ComfyUI
 
-3D previsualisation and spatial layout node for ComfyUI by [LensCowboy](https://lenscowboy.com).
+3D previsualisation and spatial layout node for ComfyUI by [Lenscowboy](https://lenscowboy.com).
 
 <img width="1024" height="576" alt="comfyPalGif" src="https://github.com/user-attachments/assets/45268975-94be-4094-ba81-4fc7afc24289" />
 
@@ -20,9 +20,9 @@ Set up camera angles, position subjects, light your scene, then render beauty, d
 - Scene state persistence across ComfyUI sessions
 - GLB asset import via file path or drag-and-drop
 
-## Optional: LensCowboy Platform Integration
+## Optional: Lenscowboy Platform Integration
 
-Connect with a LensCowboy API key to unlock:
+Connect with a Lenscowboy API key to unlock:
 - Multi-pass renders (depth, normal, alpha, ID matte)
 - Higher-resolution beauty pass (above 512px)
 - Project asset library browsing

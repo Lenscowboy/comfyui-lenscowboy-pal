@@ -13,7 +13,7 @@
 
 import { app } from "../../scripts/app.js";
 
-const EXT_NAME = "LensCowboy.PALLayout";
+const EXT_NAME = "Lenscowboy.PALLayout";
 
 // Resolve the SaaS origin once at load time, in this order:
 //   1. window.LC_API_BASE — set by an early script tag for power users
@@ -862,7 +862,7 @@ app.registerExtension({
         }
       }
 
-      // LensCowboy branding strip — DOM widget, amber mono.
+      // Lenscowboy branding strip — DOM widget, amber mono.
       // Canvas-based onDrawForeground hooks are no-ops on the new Vue frontend,
       // so branding styling must be done via DOM widgets. DO NOT splice
       // widgets[] to reorder — ComfyUI maps widget values positionally and

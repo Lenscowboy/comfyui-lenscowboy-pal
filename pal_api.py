@@ -1,5 +1,5 @@
 """
-PAL API client — LensCowboy platform connection for ComfyUI node.
+PAL API client — Lenscowboy platform connection for ComfyUI node.
 
 Handles: session auth, project load, scene save, pipeline write-back.
 All calls are optional — the node works fully without a connection.
@@ -16,7 +16,7 @@ LC_API_BASE = "https://app.lenscowboy.com"
 
 
 def _request(method, path, api_key, body=None, timeout=15):
-    """Make an authenticated request to the LensCowboy API."""
+    """Make an authenticated request to the Lenscowboy API."""
     url = f"{LC_API_BASE}{path}"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -43,7 +43,7 @@ def validate_session(api_key: str) -> dict | None:
 
 def fetch_project_data(api_key: str, project_id: str = "", shot_id: str = "") -> dict:
     """
-    Fetch project context from the LensCowboy platform.
+    Fetch project context from the Lenscowboy platform.
     Returns merged dict with assets, shots, scene state, etc.
     Returns empty dict on any failure (graceful degradation).
     """
