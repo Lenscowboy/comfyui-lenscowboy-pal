@@ -31,7 +31,7 @@ ComfyUI Browser
     ├─ Bridge: viewport state ↔ _pal_scene_state hidden widget
     └─ beforeQueuePrompt: blocks if passes not rendered (iframe mode)
 
-PAL SaaS iframe target (lenscowboy-pipeline-saas/pal/web)
+PAL web viewport (served by the Lenscowboy platform)
   /pal?comfy=1&token=...
     ├─ Full viewport with all PAL features
     ├─ Listens for postMessage from ComfyUI parent
@@ -192,7 +192,7 @@ Paid-tier users generate a long-lived JWT at [app.lenscowboy.com/settings](https
 
 Token properties (JWT claims):
 - `kind: "comfy"` — distinguishes these from sheet/session tokens
-- `jti` — UUID used for revocation (Firestore doc at `tenants/{id}/comfy_tokens/{jti}`)
+- `jti` — UUID used for revocation
 - `plan` — baked at mint time, but downgraded to current tenant plan at decode time
 - `exp` — 365 days from mint
 
@@ -200,78 +200,7 @@ Revocation: user deletes the key in Settings → Firestore doc removed → next 
 
 No API key → node runs in free tier (24h anonymous JWT auto-minted via `?comfy=1`). Viewport + beauty ≤512 only.
 
-## Plans & Pricing
-
-ComfyUI users are 3D artists, not necessarily full Lenscowboy SaaS subscribers. The node supports four plan states, resolved from the API key JWT (`plan` claim). No key = free tier (anonymous 24h JWT auto-injected via `comfy=1` param).
-
-### Plan matrix
-
-| Feature | Free | **COMFY PAL** | SaaS Subscriber (Creator / Influencer / Pro / Studio) | Enterprise |
-|---|---|---|---|---|
-| Viewport, proxies, GLB/OBJ/FBX import | ✓ | ✓ | ✓ | ✓ |
-| Camera / animation (local to node) | ✓ | ✓ | ✓ | ✓ |
-| Beauty render ≤ 512 | ✓ | ✓ | ✓ | ✓ |
-| Beauty render > 512 (up to 2048) | ✗ | ✓ | ✓ | ✓ |
-| Depth / Normal / Alpha / ID matte passes | ✗ | ✓ | ✓ | ✓ |
-| Local renderer (`use_local_renderer`) | ✓ | ✓ | ✓ | ✓ |
-| Save to Drive (render output) | ✗ | ✗ | ✓ | ✓ |
-| Project load | ✗ | ✗ | ✓ | ✓ |
-| Sequence export (multi-shot) | ✗ | ✗ | ✗ | ✓ |
-| Pipeline writeback (Export to Pipeline) | ✗ | ✗ | ✗ | ✓ |
-| Breakdown integration (Load from Breakdown) | ✗ | ✗ | ✗ | ✓ |
-
-### Pricing
-
-| Plan | Monthly | Annual | What it unlocks |
-|---|---|---|---|
-| Free | $0 | — | Try-before-you-buy: 512 beauty, viewport, import |
-| **COMFY PAL** | **$7** | **$49 (42% off)** | Full-res beauty + all passes, comfy-node-only |
-| Creator+ (SaaS plans) | (as per SaaS) | (as per SaaS) | Everything COMFY PAL offers + SaaS production pipeline |
-| Enterprise | R1999 (founding, 2yr) | — | Everything + sequence export, breakdown, LCBE, delivery |
-
-### Positioning rationale
-
-COMFY PAL is a funnel tier, not a PAL-features-upgrade path to Enterprise. The product differentiation is:
-
-- **COMFY PAL = a node.** For comfy users who want pro PAL passes inside their own graph.
-- **SaaS Creator+ = the Daily pipeline.** Single-shot production runs driven by sheet config.
-- **Enterprise = the full factory.** Script → breakdown → shot list → PAL layout → multi-vendor generation → color → music → delivery. Things ComfyUI fundamentally cannot do: multi-shot orchestration, script parsing, continuity, LCBE bidding, client-review workflows.
-
-Don't compete with ComfyUI on PAL features. Differentiate by scope of production.
-
-### Server-side plan → features mapping
-
-Lives in [`app/pal_comfy.py`](../lenscowboy-pipeline-saas/app/pal_comfy.py) `_PLAN_FEATURES`:
-```python
-"free":          ["viewport", "beauty_512"]
-"comfy_pal":     ["viewport", "beauty_512", "beauty_hires", "multipass"]
-"creator":       ["viewport", "beauty_512", "beauty_hires", "multipass", "drive_save"]
-"influencer":    ["viewport", "beauty_512", "beauty_hires", "multipass", "drive_save"]
-"pro":           ["viewport", "beauty_512", "beauty_hires", "multipass", "drive_save"]
-"studio":        ["viewport", "beauty_512", "beauty_hires", "multipass", "drive_save"]
-"enterprise":    ["viewport", "beauty_512", "beauty_hires", "multipass", "drive_save",
-                  "sequence_export", "breakdown", "pipeline_writeback"]
-```
-
-The iframe fetches this at boot via `GET /pal/comfy/features` (tolerant of missing auth — anonymous callers receive the free feature set). Results cached in `window._palFeatures` and used by the Render/Export dialog and the Load-from-Breakdown / Export-to-Pipeline buttons to lock UI up front rather than failing at submit with a 401.
-
-### Admin & billing (SaaS-side)
-
-Lives in `lenscowboy-pipeline-saas/app/`. Already wired:
-
-- Paystack plan codes `PLN_45yu7i622128n7j` (monthly) and `PLN_amx7gja7evbrskw` (annual) map to internal plan `comfy_pal` in `billing.py:_map_paystack_plan`.
-- Webhook activates `subscriptions.comfy_pal` on the hub client with `cadence` (`monthly` / `annual`) and `since` timestamp via `_apply_hub_comfy_pal_subscription`. Existing SaaS-tier tenants are NOT downgraded — COMFY PAL stacks as a parallel subscription.
-- New tenants subscribing directly to COMFY PAL get `tenant.plan = "comfy_pal"` and a JWT unlocking multipass features.
-- Hub admin client page (`app/hub/web/client.html`) shows the COMFY PAL row in the Subscriptions table with cadence and activation date.
-- Schema entry in `app/hub_schema.py` under `subscriptions.comfy_pal`.
-
-**Still TODO (nice-to-haves, not blocking launch):**
-- **Cancel flow**: Paystack `subscription.disable` webhook currently calls `suspend_tenant` globally. For COMFY PAL cancellation on a tenant who also has a SaaS tier, we should just flip `subscriptions.comfy_pal.active = False` without suspending the tenant or clearing `tenant.plan`.
-- **Admin "cancel COMFY PAL" button**: manual off-switch in `client.html` that flips the flag without touching other subscriptions.
-- **Feature overrides panel**: `app/hub/web/admin.html` currently lets admins grant/revoke individual features against videobot tiers; extend to `comfy_pal` so per-tenant exceptions are possible.
-- **Usage metrics**: track render count per COMFY PAL tenant (cheap — just increment a counter on each `/pal/comfy/features` hit or render). Useful for validating $7 pricing once there's user data.
-
-### Gate behaviour
+## Tier behaviour in the UI
 
 - No watermark on any tier — the 512px cap is the free-tier limit
 - Locked features: button visible but dimmed with lock icon
@@ -343,15 +272,9 @@ The modern ComfyUI frontend broke several LiteGraph patterns that worked fine in
 
 **Iframe-side consumer** (in `pal/web/index.html` `pal:load-models` handler): `_buildResourceMap(model.resources)` turns each resource into a blob URL; `_makeManager(urlMap)` builds a `THREE.LoadingManager` with a URL modifier that maps texture URIs to those blobs. Case-insensitive filename-leaf matching handles mixed case, backslash paths from FBX-embedded Windows refs, and URL-percent-encoded names. Warns `[PAL comfy] URL modifier: no match for ...` when it can't find a match — useful debugging signal.
 
-### Server is source of truth for plan gates
-
-Client-side UI gates exist for UX (show lock icons, suppress obviously-invalid choices) but are NOT load-bearing. The actual enforcement is:
-- `app/pal_comfy.py::execute()` on the SaaS side reads `plan` from `/pal/session` and blanks depth/normal/alpha for `plan == "free"`.
-- Any client-side multipass-gate upgrade modal was removed from the `pal:render` handler — it was racing against the async `/pal/session` call and showed "Free tier" errors to enterprise users during that window.
-
 ### CORS required for the node's cross-origin calls
 
-`pal_node.js::_lcCheckSession` POSTs to `app.lenscowboy.com/pal/session` from ComfyUI's origin (`127.0.0.1:8188`). SaaS's `app/main.py` needs `CORSMiddleware` with `allow_origins=["*"]`, `allow_credentials=False` (Bearer-token auth, no cookies). Without it the preflight fails, `_lcSession` stays null, and every client-side feature check falls back to FREE_FEATURES.
+`pal_node.js::_lcCheckSession` POSTs to `app.lenscowboy.com/pal/session` from ComfyUI's origin (`127.0.0.1:8188`), so the request is cross-origin and needs CORS to succeed. Without it the preflight fails, `_lcSession` stays null, and every client-side feature check falls back to FREE_FEATURES.
 
 ### Session refresh on api_key paste
 
@@ -367,42 +290,10 @@ Client-side UI gates exist for UX (show lock icons, suppress obviously-invalid c
 - Python changes require ComfyUI restart; JS changes require hard browser refresh (Cmd+Shift+R)
 - The symlink from `~/Documents/ComfyUI/custom_nodes/comfyui-lenscowboy-pal` → this repo means edits here are live
 - Free-tier gets anonymous 24h JWT auto-injected via `comfy=1` param
-- `/pal/static/*` has no auth gate — client-side JS/CSS, not data
 - `pal_renderer` deps are installed separately; pal_node.py loads even without them (lazy imports)
 - Iframe `allow="fullscreen; clipboard-read; clipboard-write"` attribute set on `<iframe>` lets the viewport use clipboard and fullscreen — but `showDirectoryPicker` stays blocked (hard browser rule for cross-origin iframes). Use node-side file pickers instead.
-- Two resolution pickers exist in the viewport: the main Render-modal dropdown AND the quick-access `showResolutionModal`. Both need plan gates for >512 — gating only one lets the other bypass the free-tier cap.
 - Output socket names use spaces not underscores (`beauty pass` not `beauty_pass`) — matches the docs aesthetic but means any rename breaks saved workflow wires.
 - Widget default INT values require `{"min": N}` below the desired default; omitting `min` lets ComfyUI send empty strings → Python `int('')` → `ValueError`.
-
-## SaaS-side Drive scope migration (2026-04-28)
-
-The SaaS backend swapped its user-OAuth Drive scope from `auth/drive` (restricted, requires CASA) to `auth/drive.file` (sensitive only, no CASA). Trade-off: under drive.file, the user-OAuth client can ONLY see files IT created or files Picker-opened — SA-uploaded pipeline outputs and user-deposited Drive files become invisible to user-OAuth credentials. Resolution: every Drive **READ** path moved to the service account.
-
-**ComfyUI PAL impact (asset manifest endpoint):**
-
-`GET /pal/comfy/project/{project_id}` in `lenscowboy-pipeline-saas/app/pal_comfy.py` (~L329-L364) builds the asset manifest for a project by listing `*.glb` / `*.gltf` files in the tenant's `source_objects` Drive folder. As of commit `1f12d09` this read goes through `_get_drive_service_sa()` (imported from `app.sheet_create`) instead of the user's OAuth refresh token — necessary because the `source_objects` folder typically holds user-deposited GLBs that user-OAuth drive.file can't see.
-
-```python
-# app/pal_comfy.py — asset manifest fetch
-from app.sheet_create import _get_drive_service_sa
-drive = _get_drive_service_sa()
-result = drive.files().list(
-    q=f"'{objects_folder}' in parents and (name contains '.glb' or name contains '.gltf') and trashed=false",
-    fields="files(id, name, webContentLink)",
-    supportsAllDrives=True,
-).execute()
-```
-
-**Client-side change required: none.** The ComfyUI node continues to call the same endpoint and receives the same response shape (`asset_manifest: [{id, name, glb_url, type}, ...]`). The migration is purely server-side. The SA holds writer on each project folder via `_share_with_service_account` at create time, so permission inheritance covers the whole project tree regardless of which actor uploaded each asset.
-
-**Token-side note (no change, just for orientation):** comfy tokens still carry `kind="comfy"` + a `jti` claim. Revocation = doc delete on `tenants/{tid}/comfy_tokens/{jti}`. Cached 60s per Cloud Run instance. Plan-downgrade enforcement clamps the token's effective plan to `min(baked_plan, current_tenant.plan)` via `_COMFY_PLAN_RANK` in `pal_comfy.py`. None of this is affected by the Drive migration — distinct subsystems.
-
-### Adjacent SaaS changes (2026-04-28)
-
-| Change | Commit | ComfyUI relevance |
-|---|---|---|
-| `GZipMiddleware(minimum_size=1000)` added in `app/main.py` after CORS | `456987d` | Transparent. `requests` and the browser fetch decode gzip automatically. JSON payloads compress 4-5×. No client-side change. |
-| `/pal/drive-thumb` ffmpeg fallback — runs `ffmpeg -frames:v 1` on a range-fetched 25 MB head when Drive returns no `thumbnailLink` (common for SA-owned files) | `d9696d8` | Doesn't affect the comfy node (we don't hit `/pal/drive-thumb` directly), but if a future feature surfaces project assets in the comfy widget, thumbnails for SA-owned GLBs now resolve instead of 404'ing. |
 
 ## Testing
 
@@ -414,7 +305,7 @@ result = drive.files().list(
 5. Queue prompt → beauty/depth/normal/alpha/id_matte flow downstream
 
 ### TODO — ComfyUI node integration test
-We've had multiple rounds of "no frame reaches Video Combine" bugs caused by Python/JS widget-serialization mismatches that are invisible until you queue a real prompt. Needs a headless integration test: spin up ComfyUI in CI, load a workflow JSON with `PALLayoutNode` → `PreviewImage`, seed `_pal_scene_state` with a known beauty base64, POST to `/prompt`, assert the output image is non-blank and matches expected pixel hash. Catches widget-wiring, INPUT_TYPES drift, decode path regressions automatically. Complementary SaaS-side Playwright todo is in `lenscowboy-pipeline-saas/CLAUDE.md` under "Testing Changes → TODO".
+We've had multiple rounds of "no frame reaches Video Combine" bugs caused by Python/JS widget-serialization mismatches that are invisible until you queue a real prompt. Needs a headless integration test: spin up ComfyUI in CI, load a workflow JSON with `PALLayoutNode` → `PreviewImage`, seed `_pal_scene_state` with a known beauty base64, POST to `/prompt`, assert the output image is non-blank and matches expected pixel hash. Catches widget-wiring, INPUT_TYPES drift, and decode-path regressions automatically.
 
 ## Deployment
 
@@ -449,9 +340,3 @@ git config core.eol lf
 Plus a committed `.gitattributes` with `* text=auto eol=lf` so the policy travels with the repo.
 
 Restart ComfyUI after any Python change. Hard-refresh the browser (Ctrl+Shift+R, or right-click reload → Empty Cache and Hard Reload) after any JS change.
-
-## Related memory
-
-- `project_local_renderer.md` — pygfx vs alternatives, Blender bpy as premium deferred path
-- `feedback_comfy_shadows_saas.md` — rule: iframe shadows SaaS, don't branch
-- `project_assethub_multi_object.md` — assethub.io multi-object workflow inspiration for future 3D pipeline rethink
